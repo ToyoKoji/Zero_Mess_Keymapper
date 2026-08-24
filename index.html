@@ -276,6 +276,7 @@ label.chk{display:flex;gap:5px;align-items:center;font-size:12.5px;color:var(--t
       <button id="btn-ktest" title="キーボードから実際に入力して、OSに届いたキーを確認できます">キーテスター</button>
       <button id="btn-kb" title="編集対象のキーボード(物理レイアウト)の管理・切替">キーボード</button>
       <button id="btn-gh" title="GitHubのzmk-configリポジトリから直接読み込み・保存します">GitHub連携</button>
+      <button id="btn-winfix" title="Windowsで反応しないメディアキー(K_系)を、全OSで動作するC_系に一括置換します">Windows互換チェック</button>
       <div class="msep"></div>
       <button id="btn-reset" class="danger" title="編集内容をすべて破棄して初期状態(読み込み済みのkeymap)に戻します">リセット</button>
     </div>
@@ -839,6 +840,7 @@ Shiftの有無で記号が変わるキー(<kbd>'</kbd> と <kbd>"</kbd> など)�
       <dl class="hdl">
         <dt id="help-shift">Shift入力トグル</dt><dd>そのレイヤーで、Shiftを押しながらの記号打ちを使うかを指定します。「有効」のレイヤーだけJIS変換でmod-morphを生成し、キー右上にShift面を表示します。ショートカットの修飾同時押しには影響しません。<span class="dim">役立つ場面: ファンクション・マウス・Bluetooth用など記号打ちをしないレイヤーを「無効」にしておくと、不要なmod-morphが作られず、キーマップも表示もシンプルに保てます。</span></dd>
         <dt>レイヤーグループ</dt><dd>US / GENERAL(共有) / JIS の3グループでレイヤーを管理します(追加も可能)。書き出し時はグループ番号を含む名前で保存されるため、グループが違えば同じレイヤー名を使えます。グループ名の左のラベルには色が付き、ラベル横の●からいつでも変更できます(初期値: US=青、JIS=シアン、GENERAL=アンバー)。<span class="dim">役立つ場面: US側とJIS側で対応するレイヤーに同じ名前を付けられるので、対応関係がひと目で分かります。</span></dd>
+        <dt>Windows互換チェック</dt><dd>メディアキーには、見た目は同じでも中身が異なる2種類のキーコードがあります(<kbd>K_MUTE</kbd> と <kbd>C_MUTE</kbd> など)。前者はWindowsが解釈しないため<b>押しても何も起きません</b>。「☰ メニュー → Windows互換チェック」で該当箇所を検出し、全OSで動作するキーコードへ一括置換できます。<span class="dim">役立つ場面: ミュートや再生停止が効かない原因の多くがこれです。書き出し時の整合性チェックでも自動で警告します。</span></dd>
         <dt>整合性チェック</dt><dd>書き出し・プレビュー時に、存在しないレイヤーへの参照や未定義ビヘイビアなどを自動で検査し、問題があれば一覧表示します。<span class="dim">役立つ場面: ビルドしてから気付くミスを、書き出す前に発見できます。</span></dd>
         <dt>バックアップ / 復元</dt><dd>全設定をJSONファイル1つで保存・完全復元できます。<span class="dim">役立つ場面: ブラウザのデータ削除や別PCへの移行、配列の試行錯誤前の保険に。</span></dd>
         <dt>チートシート</dt><dd>全レイヤー・コンボ・各種設定をまとめた印刷用HTMLを出力します(☰ メニュー)。<span class="dim">役立つ場面: 覚えるまでの間、手元に置く配列表として使えます。</span></dd>
@@ -857,7 +859,7 @@ Shiftの有無で記号が変わるキー(<kbd>'</kbd> と <kbd>"</kbd> など)�
  * 文字テーブル(LOCALE_CHARS) / .keymapパース / 生成 / 各機能ノードの
  * パース&パッチ / グループ・変換ユーティリティ / 表示ラベル
  * ============================================================ */
-const APP_VERSION = '1.5.0';
+const APP_VERSION = '1.6.0';
 
 let NUM_KEYS = 43;
 // roBa physical layout: [w,h,x,y,rot(centi-deg*100),rx,ry]
@@ -876,6 +878,37 @@ let PHYS = ROBA_KEYS;
 // 行構造(書き出し整形用): [開始index, 左手キー数, 行の総キー数]
 const ROBA_ROWS = [[0,5,10],[10,6,12],[22,6,12],[34,6,9]];
 let ROWS = ROBA_ROWS;
+/* ---------- OS互換性の注意が必要なキーコード ----------
+ * HIDの「キーボードページ」にあるメディアキー(K_*)は、Windowsが
+ * 解釈しないため無反応になる。同じ機能で「コンシューマページ」の
+ * C_* を使うと全OSで動作する。出典: zmk.dev/docs/keymaps/list-of-keycodes */
+const WIN_INCOMPATIBLE = {
+  K_MUTE:'C_MUTE', K_MUTE2:'C_MUTE',
+  K_VOLUME_UP:'C_VOLUME_UP', K_VOL_UP:'C_VOLUME_UP', K_VOLUME_UP2:'C_VOLUME_UP', K_VOL_UP2:'C_VOLUME_UP',
+  K_VOLUME_DOWN:'C_VOLUME_DOWN', K_VOL_DN:'C_VOLUME_DOWN', K_VOLUME_DOWN2:'C_VOLUME_DOWN', K_VOL_DN2:'C_VOLUME_DOWN',
+  K_PLAY_PAUSE:'C_PLAY_PAUSE', K_PP:'C_PLAY_PAUSE',
+  K_NEXT:'C_NEXT', K_PREVIOUS:'C_PREVIOUS', K_PREV:'C_PREVIOUS',
+  K_STOP2:'C_STOP', K_STOP3:'C_STOP', K_EJECT:'C_EJECT'
+};
+/** バインディング内のWindows非互換キーコードを検出 */
+function findWinIncompatible(raw){
+  const t = (raw||'').trim().split(/\s+/);
+  const out = [];
+  for(const tk of t.slice(1)){
+    const inner = tk.replace(/^(?:L|R)[SCAG]\(|\)+$/g,'');
+    if(WIN_INCOMPATIBLE[inner]) out.push({from:inner, to:WIN_INCOMPATIBLE[inner]});
+  }
+  return out;
+}
+/** バインディングをWindows互換のキーコードに置き換える */
+function fixWinIncompatible(raw){
+  let s = raw;
+  for(const k in WIN_INCOMPATIBLE){
+    s = s.replace(new RegExp('(^|[\\s(])'+k+'(?=$|[\\s)])','g'), (m,p1)=>p1+WIN_INCOMPATIBLE[k]);
+  }
+  return s;
+}
+
 /* ---------- GitHub連携ヘルパ(DOM非依存) ---------- */
 /** "owner/repo" 形式や各種GitHub URLからowner/repoを取り出す */
 function parseRepoRef(input){
@@ -1743,7 +1776,7 @@ RET:'⏎',ESC:'Esc',BSPC:'⌫',DEL:'Del',TAB:'⇥',SPACE:'␣',CAPS:'Caps',PSCRN
 LEFT:'←',RIGHT:'→',UP:'↑',DOWN:'↓',HOME:'Home',END:'End',PG_UP:'PgUp',PG_DN:'PgDn',INS:'Ins',
 LSHFT:'⇧',RSHFT:'⇧R',LCTRL:'Ctrl',RCTRL:'CtrlR',LALT:'Alt',RALT:'AltR',LGUI:'Win',RGUI:'WinR',
 INT_HENKAN:'変換',INT_MUHENKAN:'無変換',INT_KANA:'かな',INT1:'ろ\\',INT3:'¥',NUHS:']}',
-K_CANCEL:'Cancel',SLCK:'ScrLk',PAUSE_BREAK:'Pause',K_APP:'Menu',K_CMENU:'Menu',C_STOP:'停止',C_POWER:'電源',C_SLEEP:'Sleep',C_AC_BACK:'戻る',C_AC_FORWARD:'進む',C_AC_REFRESH:'更新',C_AC_SEARCH:'検索',C_AC_HOME:'⌂',C_AL_CALCULATOR:'電卓',C_AL_MAIL:'メール',K_PREV:'⏮',K_NEXT:'⏭',K_PLAY_PAUSE:'⏯',K_MUTE:'Mute',SCROLLLOCK:'ScrLk',KP_NUMLOCK:'NumLk',LANG1:'かな',LANG2:'英数',C_VOLUME_UP:'Vol+',C_VOLUME_DOWN:'Vol-',C_BRIGHTNESS_INC:'☀+',C_BRIGHTNESS_DEC:'☀-',K_SCROLL_UP:'Scr↑',K_SCROLL_DOWN:'Scr↓', C_VOL_UP:'Vol+',C_VOL_DN:'Vol-',C_MUTE:'Mute',C_PP:'⏯',C_NEXT:'⏭',C_PREV:'⏮',C_BRI_UP:'☀+',C_BRI_DN:'☀-'
+K_CANCEL:'Cancel',K_MUTE:'Mute',K_PLAY_PAUSE:'⏯',K_PP:'⏯',K_NEXT:'⏭',K_PREV:'⏮',K_PREVIOUS:'⏮',K_VOL_UP:'Vol+',K_VOL_DN:'Vol-',K_VOLUME_UP:'Vol+',K_VOLUME_DOWN:'Vol-',SLCK:'ScrLk',PAUSE_BREAK:'Pause',K_APP:'Menu',K_CMENU:'Menu',C_STOP:'停止',C_POWER:'電源',C_SLEEP:'Sleep',C_AC_BACK:'戻る',C_AC_FORWARD:'進む',C_AC_REFRESH:'更新',C_AC_SEARCH:'検索',C_AC_HOME:'⌂',C_AL_CALCULATOR:'電卓',C_AL_MAIL:'メール',K_PREV:'⏮',K_NEXT:'⏭',K_PLAY_PAUSE:'⏯',K_MUTE:'Mute',SCROLLLOCK:'ScrLk',KP_NUMLOCK:'NumLk',LANG1:'かな',LANG2:'英数',C_VOLUME_UP:'Vol+',C_VOLUME_DOWN:'Vol-',C_BRIGHTNESS_INC:'☀+',C_BRIGHTNESS_DEC:'☀-',K_SCROLL_UP:'Scr↑',K_SCROLL_DOWN:'Scr↓', C_VOL_UP:'Vol+',C_VOL_DN:'Vol-',C_MUTE:'Mute',C_PP:'⏯',C_NEXT:'⏭',C_PREV:'⏮',C_BRI_UP:'☀+',C_BRI_DN:'☀-'
 };
 function kcLabel(kc){
   const mm = kc.match(/^(LS|RS|LC|RC|LA|RA|LG|RG)\((.+)\)$/);
@@ -1944,7 +1977,7 @@ const DEFAULT_KEYMAP = `#include <behaviors.dtsi>
 };
 `;
 
-if (typeof module !== 'undefined') module.exports = {parseKeymap, generateKeymap, convBinding, convBindingUs, remapRefsOnly, normBinding, convertLayerToJis, convertAllToJis, groupRanges, gnameFor, buildJisMaps, nodeNameFor, parseHoldtapOne, patchHoldtapOne, parseStickyOne, patchStickyOne, parseMacros, genMacrosInner, parseMacroSteps, genMacroBindings, parseCondLayers, genCondLayersInner, charFor, LOCALE_CHARS, SYM_TO_LS, parseRepoRef, utf8ToBase64, base64ToUtf8, pickConfigFiles, KEYBOARD, ROBA_PROFILE, setKeyboard, getKeyboard, parsePhysicalLayout, deriveRows, gridKeys, makeEmptyKeymap, APP_VERSION, canon, kcLabel, JIS_MAP, REV_MAP, US_TO_JIS_ORDER, tokenizeBindings, DEFAULT_KEYMAP, NUM_KEYS, bindingLabel, JIS_MORPHS, parseCombos, parseBehaviors, parseTrackball, patchTrackball, genConf, CONF_DEFAULTS, PHYS};
+if (typeof module !== 'undefined') module.exports = {parseKeymap, generateKeymap, convBinding, convBindingUs, remapRefsOnly, normBinding, convertLayerToJis, convertAllToJis, groupRanges, gnameFor, buildJisMaps, nodeNameFor, parseHoldtapOne, patchHoldtapOne, parseStickyOne, patchStickyOne, parseMacros, genMacrosInner, parseMacroSteps, genMacroBindings, parseCondLayers, genCondLayersInner, charFor, LOCALE_CHARS, SYM_TO_LS, parseRepoRef, utf8ToBase64, base64ToUtf8, pickConfigFiles, WIN_INCOMPATIBLE, findWinIncompatible, fixWinIncompatible, KEYBOARD, ROBA_PROFILE, setKeyboard, getKeyboard, parsePhysicalLayout, deriveRows, gridKeys, makeEmptyKeymap, APP_VERSION, canon, kcLabel, JIS_MAP, REV_MAP, US_TO_JIS_ORDER, tokenizeBindings, DEFAULT_KEYMAP, NUM_KEYS, bindingLabel, JIS_MORPHS, parseCombos, parseBehaviors, parseTrackball, patchTrackball, genConf, CONF_DEFAULTS, PHYS};
 </script>
 
 <script>
@@ -3211,6 +3244,20 @@ function runValidation(){
     if(!m.steps.length) issues.push(`マクロ "${m.name}": ステップがありません`);
     if(m.steps.some(s=>s.type!=='wait' && !s.binding)) issues.push(`マクロ "${m.name}": 未設定のステップがあります`);
   });
+  // Windowsで無反応になるキーコードの検出
+  const winIssues = new Map();
+  const scanWin = (b, where)=>{
+    findWinIncompatible(b).forEach(x=>{
+      const key = x.from+'→'+x.to;
+      if(!winIssues.has(key)) winIssues.set(key, {x, places:[]});
+      winIssues.get(key).places.push(where);
+    });
+  };
+  state.layers.forEach((L,li)=>L.bindings.forEach((b,ki)=>scanWin(b, gname(li)+' pos'+ki)));
+  state.combos.forEach(c=>scanWin(c.binding, 'Combo:'+c.name));
+  winIssues.forEach(v=>{
+    issues.push(`⚠ ${v.x.from} は Windows では反応しません(${v.places.length}箇所)。${v.x.to} への置き換えを推奨します — 「☰ メニュー → Windows互換チェック」で一括修正できます`);
+  });
   (state.condLayers||[]).forEach(c=>{
     c.ifLayers.forEach(x=>{ if(x<0||x>=n) issues.push(`条件付きレイヤー "${c.name}": 存在しないレイヤー ${x} を条件にしています`); });
     if(c.thenLayer<0||c.thenLayer>=n) issues.push(`条件付きレイヤー "${c.name}": ONにするレイヤーが範囲外です`);
@@ -4175,6 +4222,35 @@ document.getElementById('btn-cheat').onclick = ()=>{
   const a = document.createElement('a');
   a.href = url; a.download = 'keymap-cheatsheet.html'; a.click();
   setTimeout(()=>URL.revokeObjectURL(url), 30000);
+};
+
+/* ----- Windows互換チェック ----- */
+document.getElementById('btn-winfix').onclick = ()=>{
+  const found = [];
+  state.layers.forEach((L,li)=>L.bindings.forEach((b,ki)=>{
+    findWinIncompatible(b).forEach(x=>found.push({type:'layer', li, ki, b, x}));
+  }));
+  state.combos.forEach((c,ci)=>{
+    findWinIncompatible(c.binding).forEach(x=>found.push({type:'combo', ci, b:c.binding, x}));
+  });
+  if(!found.length){
+    document.getElementById('warnings').innerHTML = '<div class="warnbox">'+esc('✅ Windowsで反応しないキーコードは見つかりませんでした。')+'</div>';
+    return;
+  }
+  const summary = [...new Set(found.map(f=>f.x.from+' → '+f.x.to))];
+  const detail = found.slice(0,10).map(f=> f.type==='layer'? `${gname(f.li)} pos${f.ki}: ${f.b}` : `Combo ${state.combos[f.ci].name}: ${f.b}`);
+  const msg = `Windowsで反応しないキーコードが ${found.length} 箇所見つかりました。\n\n`+
+    `【置き換え内容】\n・`+summary.join('\n・')+`\n\n【該当箇所】\n・`+detail.join('\n・')+(found.length>10? `\n…ほか${found.length-10}箇所`:'')+
+    `\n\nこれらはHIDの「キーボードページ」のキーで、Windowsが解釈しないため無反応になります。\n`+
+    `同じ機能の「コンシューマページ」のキーに置き換えると、Windows・macOS・Linux・iOS・Androidすべてで動作します。\n\n置き換えますか?`;
+  if(!confirm(msg)) return;
+  state.layers.forEach(L=>{ L.bindings = L.bindings.map(fixWinIncompatible); });
+  state.combos.forEach(c=>{ c.binding = fixWinIncompatible(c.binding); });
+  state.behaviors.morphs.forEach(m=>{ m.b1 = fixWinIncompatible(m.b1); m.b2 = fixWinIncompatible(m.b2); });
+  state.behaviors.tds.forEach(t=>{ t.bindings = t.bindings.map(fixWinIncompatible); });
+  if(state.macros) state.macros.items.forEach(m=>{ m.steps.forEach(s=>{ if(s.binding) s.binding = fixWinIncompatible(s.binding); }); });
+  renderAll();
+  document.getElementById('warnings').innerHTML = '<div class="warnbox">'+esc(`✅ ${found.length}箇所を置き換えました(`+summary.join(' / ')+`)。書き出し(またはGitHubへコミット)して反映してください。`)+'</div>';
 };
 
 /* ----- GitHub連携 ----- */

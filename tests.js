@@ -198,6 +198,18 @@ section('12-a GitHub連携');
   t('pickConfigFiles', JSON.stringify(pf.keymaps)==='["config/roBa.keymap","x/y.keymap"]' && JSON.stringify(pf.confs)==='["config/roBa_R.conf"]');
 }
 
+/* ---------- 6.8 OS互換性チェック ---------- */
+section('Windows互換チェック');
+{
+  t('K_MUTE検出', C.findWinIncompatible('&kp K_MUTE')[0].to==='C_MUTE');
+  t('K_PREV→C_PREVIOUS', C.fixWinIncompatible('&kp K_PREV')==='&kp C_PREVIOUS');
+  t('修飾内も検出', C.fixWinIncompatible('&kp LC(K_NEXT)')==='&kp LC(C_NEXT)');
+  t('mt内も検出', C.fixWinIncompatible('&mt LSHIFT K_MUTE')==='&mt LSHIFT C_MUTE');
+  t('C_系は誤検出しない', C.findWinIncompatible('&kp C_MUTE').length===0 && C.findWinIncompatible('&kp C_NEXT').length===0);
+  t('通常キーは誤検出しない', C.findWinIncompatible('&kp A').length===0 && C.fixWinIncompatible('&kp A')==='&kp A');
+  t('部分一致で壊さない', C.fixWinIncompatible('&kp K_NEXT2')==='&kp K_NEXT2');
+}
+
 /* ---------- 7. バージョン/プロファイル ---------- */
 section('メタ');
 t('APP_VERSION', typeof C.APP_VERSION==='string' && /^\d+\.\d+\.\d+$/.test(C.APP_VERSION));
