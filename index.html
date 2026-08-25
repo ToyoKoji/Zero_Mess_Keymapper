@@ -15,7 +15,9 @@
     originalText : 読み込んだ.keymap原文。書き出しはこの原文への
                    「ノード単位の置換」で行い、未知の記述を保全する。
     layers[]     : {name(表示名), bindings[キー数], sensor, shiftLayer}
-    groups[]     : {name, count, color?} レイヤーの連続区間を分割。
+    groups[]     : {name, count, color?, locale?, platform?, shared?}
+                   レイヤーの連続区間を「環境」または「共有レイヤー」として
+                   分割する。環境 = キーボード配列(locale) × OS(platform)。
                    fw番号=配列添字。表示はグループ内番号(US_01等)。
                    書き出し時ノード名 = <グループ>_<番号>_<表示名>(一意)。
     combos/behaviors{morphs,tds,hts,raws}/macros{items,raws}/condLayers
@@ -26,15 +28,35 @@
     upgradeState()/migrate13to12()で自動移行。バックアップJSONは
     stateと同形。履歴はsnapshotStr()の文字列スタック(Undo/Redo)。
 
-  ■ 変換エンジン: キーコード→「意図した文字」→変換先配列のキーコード。
-    文字テーブルは core の LOCALE_CHARS(us/jis)。Shift両面が一致しない
-    キーは mod-morph(jis_*)を自動生成。グループ間対応は buildJisMaps()。
-    (汎用規格変換への拡張ポイント: LOCALE_CHARSにテーブル追加)
+  ■ 変換エンジン(2系統):
+    1) 配列変換 convBindingLocale(from,to)
+       キーコード→「その配列で出る文字」→変換先で同じ文字を出すキーコード。
+       文字テーブルは LOCALE_CHARS(us/ansi/jis/uk/de/dvorak)。
+       Shift両面が1キーで揃わない場合は mod-morph(loc_<to>_<key>)を生成。
+       配列を増やすときは LOCALE_CHARS と LOCALE_LIST に追加するだけでよい。
+       ※ US⇄JIS だけは実績のある専用実装(convBinding/convBindingUs)も残す。
+          両者が同じ結果になることは tests.js で担保している。
+    2) OS変換 convBindingPlatform(win2mac|mac2win)
+       PLATFORM_PAIRS の対応表と、Ctrl⇄Cmd の一般則。
+    グループは locale / platform 属性を持ち、UIの「グループ間変換」で
+    両方を同時に変換する。
+
+  ■ OS互換: OS_COMPAT は各キーコードのOS別動作(1/0/-1)と代替キー。
+    出典は zmk.dev のキーコード一覧。findOsIssues/fixOsIssues で検査・修正。
+
+  ■ 多言語: I18N_EN(日本語→英語の辞書)と HELP_EN(ヘルプ本文)。
+    applyLang() がDOMを走査して text/title/data-tip/placeholder を差し替える。
+    未登録の文字列は日本語のまま残る(安全側)。
 
   ■ キーボード抽象化(13-a拡張ポイント): core の KEYBOARD プロファイル。
     盤面描画/コンボ位置/チートシートはすべて KEYBOARD.keys を参照。
 
+  ■ レイヤー順序の制約(ZMK仕様): レイヤー0は常に有効で、番号が大きい
+    レイヤーが優先される。したがって共有レイヤーは全ての環境より後ろに
+    置く必要がある。findOrderIssues()/findBaseTransIssues() で検査する。
+
   ■ 命名規則: ZMK公式機能=英語(Combo/Macro等)、ツール独自概念=日本語。
+    利用者向けの概念は「環境」「共有レイヤー」「同期」で統一する。
 ===================================================================== -->
 <style>
 :root{
@@ -83,6 +105,10 @@ button.danger{color:var(--danger)}
 .ltab.jis .idx{color:var(--jis)}
 .lsep{color:var(--jis);font-size:12px;font-weight:700;border-left:2px solid var(--jis);padding-left:8px;min-width:72px}
 .lsep.gen{color:var(--warn);border-left-color:var(--warn)}
+.envmeta{font-size:10px;color:var(--dim);margin-left:6px;white-space:nowrap}
+.envrole{font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;margin-left:6px;white-space:nowrap}
+.envrole.base{background:var(--selbg);color:var(--accent)}
+.envrole.shared{background:var(--warnbg);color:var(--warn)}
 .lsep.oth{color:var(--dim);border-left-color:var(--dim)}
 .ltab.gen .idx{color:var(--warn)}
 .gbtn{padding:2px 7px;font-size:10px;line-height:1}
@@ -276,7 +302,7 @@ label.chk{display:flex;gap:5px;align-items:center;font-size:12.5px;color:var(--t
       <button id="btn-ktest" title="キーボードから実際に入力して、OSに届いたキーを確認できます">キーテスター</button>
       <button id="btn-kb" title="編集対象のキーボード(物理レイアウト)の管理・切替">キーボード</button>
       <button id="btn-gh" title="GitHubのzmk-configリポジトリから直接読み込み・保存します">GitHub連携</button>
-      <button id="btn-winfix" title="Windowsで反応しないメディアキー(K_系)を、全OSで動作するC_系に一括置換します">Windows互換チェック</button>
+      <button id="btn-winfix" title="使用するOSで反応しないキーコードを検出し、代替キーへ一括置換します">OS互換チェック</button>
       <div class="msep"></div>
       <button id="btn-reset" class="danger" title="編集内容をすべて破棄して初期状態(読み込み済みのkeymap)に戻します">リセット</button>
     </div>
@@ -291,10 +317,13 @@ label.chk{display:flex;gap:5px;align-items:center;font-size:12.5px;color:var(--t
   <div class="trow"><span class="tlabel" title="選択中のレイヤーに対する設定">レイヤー</span>
     <button id="btn-shiftlayer" title="このレイヤーでShiftを押しながらの文字入力(記号打ち)を使うかどうか。「有効」のレイヤーだけJIS変換でmod-morphを生成し、キー右上にShift面の記号を表示します。ショートカットの修飾同時押しには影響しません">⇧ Shift入力: 無効</button>
     <button id="btn-jis" class="jis" title="選択中のレイヤー側を元に、反対側(US⇄JIS)へ変換します。差異のあるキーを一覧で確認してから実行できます">⇄ US→JIS変換</button>
+    <button id="btn-platform" title="ベースにした環境の配置を、別の環境(キーボード配列 × OS)向けに変換して同期します">⇆ 環境間の同期</button>
   </div>
   <div class="trow"><span class="tlabel" title="マッピングツール上の表示設定(ファームウェアには影響しません)">表示切り替え</span>
     <button id="btn-combo-ov" title="盤面に、このレイヤーで有効なComboを重ねて表示します">⊞ Combo表示: OFF</button>
+    <button id="btn-order" title="ZMKのレイヤー優先順位に起因する問題を点検します(共有レイヤーの位置、ベース層の透過)">⇅ レイヤー順序を点検</button>
     <button id="btn-lnum" title="レイヤータブの番号表示を、グループ番号(US_01等)とファームウェアに書き込まれる実レイヤー番号(fw0等)で切り替えます">№ fw番号で表示</button>
+    <button id="btn-lang" style="min-width:64px" title="Switch display language / 表示言語を切り替えます">🌐 EN</button>
     <button id="btn-theme" style="min-width:130px" title="表示テーマの切替(自動 = OSの設定に追従)">◐ テーマ: 自動</button>
   </div>
   <div class="trow"><span class="tlabel" title="ZMKの各機能(ファームウェアに書き込まれる動作)の設定">ビヘイビア設定</span>
@@ -676,6 +705,89 @@ label.chk{display:flex;gap:5px;align-items:center;font-size:12.5px;color:var(--t
   </div>
 </div>
 
+<!-- layer order modal -->
+<div class="modal-bg" id="order-bg">
+  <div class="modal" style="width:min(820px,96vw)">
+    <button class="close" onclick="closeModal('order-bg')">✕ 閉じる</button>
+    <h2>レイヤー順序の点検<span class="qh" data-tip="ZMKでは「レイヤー0は常に有効」「番号が大きいレイヤーが優先」というルールがあります。これに反する並びだと、環境を切り替えたときに共有レイヤーが効かなくなります。">?</span> <small>環境を切り替えても正しく動くか</small></h2>
+    <div class="htxt" style="margin-bottom:10px">
+ZMKでは<b>レイヤー0が常に有効</b>で、押されたキーは<b>有効なレイヤーのうち最も番号が大きいもの</b>が使われます。この性質のため、レイヤーの並び順によっては環境を切り替えたときに不具合が起きます。
+    </div>
+    <div id="order-list"></div>
+    <div class="mrow" id="order-actions" style="display:none">
+      <button class="primary" id="order-fix">共有レイヤーを最後に移動</button>
+      <span class="hint" style="margin:0">レイヤー番号と参照は自動で調整されます</span>
+    </div>
+  </div>
+</div>
+
+<!-- OS compatibility modal -->
+<div class="modal-bg" id="os-bg">
+  <div class="modal" style="width:min(860px,96vw)">
+    <button class="close" onclick="closeModal('os-bg')">✕ 閉じる</button>
+    <h2>OS互換チェック<span class="qh" data-tip="キーコードの中には、特定のOSが解釈しないものがあります(メディアキーのK_系など)。使用するOSを選ぶと、そのOSで反応しないキーを検出し、代替キーへ置き換えられます。出典: ZMK公式のキーコード一覧。">?</span> <small>使うOSで反応しないキーを見つける</small></h2>
+    <div class="mrow"><span style="color:var(--dim)">使用するOS:</span><span id="os-targets" class="keygrid"></span></div>
+    <div id="os-list" style="max-height:52vh;overflow:auto;margin:8px 0"></div>
+    <div class="mrow" id="os-actions" style="display:none">
+      <button class="primary" id="os-fix">代替キーに一括置換</button>
+      <span class="hint" style="margin:0">代替のないキーは変更されません</span>
+    </div>
+  </div>
+</div>
+
+<!-- platform conversion modal -->
+<div class="modal-bg" id="plat-bg">
+  <div class="modal" style="width:min(860px,96vw)">
+    <button class="close" onclick="closeModal('plat-bg')">✕ 閉じる</button>
+    <h2>環境間の同期<span class="qh" data-tip="ベースにする環境の配置を、別の環境(キーボード配列 × OS)向けに作り直します。配列とOSの両方が違う場合は同時に変換するので、どの環境でも同じ操作感になります。">?</span> <small>同じ操作感を別の環境で再現する</small></h2>
+    <div class="mrow">
+      <label>基準にする環境:</label><select id="plat-src"></select>
+      <label>合わせる環境:</label><select id="plat-dst"></select>
+    </div>
+    <div class="mrow">
+      <span class="dimtxt">基準の環境:</span>
+      <label>キーボード配列:</label><select id="plat-src-loc"></select>
+      <label>OS:</label><select id="plat-src-os"></select>
+    </div>
+    <div class="mrow">
+      <span class="dimtxt">合わせる環境:</span>
+      <label>キーボード配列:</label><select id="plat-dst-loc"></select>
+      <label>OS:</label><select id="plat-dst-os"></select>
+    </div>
+    <div class="mrow">
+      <button id="plat-scan" class="primary">差分を確認</button>
+      <span class="hint" style="margin:0">「合わせる環境」の中身が置き換わります。新しい環境なら先に「＋ グループ」で作っておいてください</span>
+    </div>
+    <div id="plat-list" style="max-height:48vh;overflow:auto;margin:8px 0"></div>
+    <div class="mrow" id="plat-actions" style="display:none">
+      <button class="primary" id="plat-exec">同期する</button>
+      <button id="plat-cancel">キャンセル</button>
+      <span class="hint" style="margin:0">チェックしたキーのみ変換します</span>
+    </div>
+  </div>
+</div>
+
+<!-- export guide modal -->
+<div class="modal-bg" id="export-bg">
+  <div class="modal" style="width:min(760px,96vw)">
+    <button class="close" onclick="closeModal('export-bg')">✕ 閉じる</button>
+    <h2>書き出しました — このあとの手順</h2>
+    <div class="htxt" style="margin-bottom:10px">
+<b id="exp-file"></b> をダウンロードしました。このファイルは<b>キーボードのキー配置を書いた設計図</b>です。これをGitHubでファームウェア（<kbd>.uf2</kbd>）に変換してから、キーボードに書き込みます。
+    </div>
+    <div class="hstep"><span class="hnum">1</span><span>お使いの <b>zmk-config リポジトリ</b>をGitHubで開きます</span></div>
+    <div class="hstep"><span class="hnum">2</span><span><kbd id="exp-path"></kbd> を、ダウンロードしたファイルで<b>置き換えます</b><br><span class="dimtxt">Add file → Upload files に、同じ名前のファイルをドラッグ＆ドロップすると上書きされます</span></span></div>
+    <div class="hstep"><span class="hnum">3</span><span>コミットすると <b>GitHub Actions</b> が自動でビルドを始めます（3〜8分）</span></div>
+    <div class="hstep"><span class="hnum">4</span><span>Actions → 実行中の項目 → ページ<b>最下部の Artifacts</b> から firmware をダウンロード</span></div>
+    <div class="hstep"><span class="hnum">5</span><span>zipの中の <kbd>.uf2</kbd> を、ブートローダーモードのキーボード（USBメモリのように認識されます）にコピー</span></div>
+    <div class="mrow" style="margin-top:14px">
+      <button class="primary" onclick="closeModal('export-bg'); document.getElementById('btn-gh').click();">GitHub連携でこの手順を省く</button>
+      <span class="hint" style="margin:0">連携すると 1〜2 がボタン1つになります</span>
+    </div>
+    <div class="hint">この案内は「? ヘルプ → このツールについて」でいつでも読めます。</div>
+  </div>
+</div>
+
 <!-- preview modal -->
 <div class="modal-bg" id="preview-bg">
   <div class="modal">
@@ -706,32 +818,55 @@ label.chk{display:flex;gap:5px;align-items:center;font-size:12.5px;color:var(--t
       <div class="htxt">
 ZMKファームウェア用のキーマップエディタです。ブラウザだけで動作し、編集内容は自動で保存されます。<br><br>名前の <b>Zero Mess Keymapper</b> は ZMK のバクロニムで、「配列のこんがらがりをゼロにする」という狙いを表しています。
       </div>
+      <div class="subh">考え方 — 「環境」ごとにレイヤーを持つ</div>
+      <div class="htxt">
+このツールでは、<b>使う場面のことを「環境」</b>と呼びます。環境は <b>キーボード配列（OSの設定）× OS</b> の組み合わせです。<br><br>
+例: 「会社PC = JIS × Windows」「自宅Mac = US × macOS」「iPad = US × iOS」<br><br>
+環境ごとにレイヤーのまとまりを作り、<b>ひとつをベースとして設計</b>し、残りは<b>「⇆ 環境間の同期」で自動生成</b>します。実機では、共有レイヤーに置いた切り替えキー（<kbd>&to</kbd>）で環境を切り替えます。こうすると、<b>どの機種でも指の動きを変えずに済みます</b>。<br><br>
+マウスやBluetoothのように環境に依存しない層は<b>「共有」</b>としてまとめ、<b>すべての環境より後ろ</b>に置きます（理由は「このツールの機能 → レイヤー順序の点検」を参照）。
+      </div>
       <div class="subh">できること</div>
       <div class="htxt">
 ・盤面をクリックしてキー配置を編集<br>
 ・Combo / Mod-Morph / Tap-Dance / Macro / トラックボールの設定<br>
 ・US配列で作った配置を、JIS認識のOS用に自動変換(US⇄JIS変換)<br>
-・GitHubのzmk-configから直接読み込み・コミット
+・WindowsとmacOSで操作感を揃える(Win⇄Mac変換)<br>
+・GitHubのzmk-configから直接読み込み・コミット<br>
+・日本語 / English の表示切り替え
       </div>
       <div class="subh">他のツールとの違い</div>
       <dl class="hdl" style="margin-top:0">
         <dt>このツールならでは</dt>
         <dd>・US⇄JIS変換(Shiftペアのmod-morph自動生成を含む)<br>
+・Win⇄Mac変換(ショートカットと日本語入力キーの相互変換)<br>
+・OS互換チェック(使用OSで反応しないキーの検出と修正)<br>
 ・Shift入力トグルと、実際に入力される文字でのキー表示<br>
-・レイヤーグループ(並べ替え・色分け・fw番号の自動追従)<br>
+・環境ごとのレイヤー管理と、環境間の同期<br>
 ・roBaのトラックボール(PMW3610)設定UI<br>
 ・インストール不要。ブラウザだけで動き、オフラインでも使えます</dd>
         <dt>できないこと</dt>
-        <dd>・キーボードへの直接書き込み(ZMK Studioのようなリアルタイム反映)。GitHub Actionsでのビルドが必要です<br>
+        <dd>・キーボードへの直接書き込み(リアルタイム反映)。GitHub Actionsでのビルドが必要です。手軽な入れ替えだけなら ZMK Studio との併用が便利です<br>
 ・roBa以外のキーボードへの対応(現時点)<br>
 ・パラメータ付きの自作ビヘイビアの編集(壊さないよう、内容はそのまま保持します)</dd>
       </dl>
+      <div class="subh">.keymap ファイルとは</div>
+      <div class="htxt">
+ZMKでは、キー配置を <kbd>.keymap</kbd> というテキストファイルに書きます。これは<b>設計図</b>であって、そのままキーボードに入れられるものではありません。GitHub上でビルド（コンパイル）して、キーボードが読める <kbd>.uf2</kbd> というファームウェアに変換する必要があります。<br><br>
+このツールは設計図の<b>編集</b>を担当します。ビルドはGitHubが行います（無料・自動）。ブラウザだけでビルドすることは技術的にできないため、この分担はどのZMK用エディタでも共通です。
+      </div>
       <div class="subh">キーボードへの反映</div>
       <div class="hstep"><span class="hnum">1</span><span>「.keymap書き出し」でファイルを保存します</span></div>
       <div class="hstep"><span class="hnum">2</span><span>GitHubリポジトリの <kbd>config/roBa.keymap</kbd> に上書きします</span></div>
       <div class="hstep"><span class="hnum">3</span><span>GitHub Actionsが自動でビルドします</span></div>
       <div class="hstep"><span class="hnum">4</span><span>できた .uf2 をキーボードに書き込みます</span></div>
       <div class="hint">トラックボールのセンサー設定(速度など)のみ、<kbd>config/roBa_R.conf</kbd> への反映が別途必要です。<br>「☰ メニュー → GitHub連携」を使うと、1〜2の手順(ダウンロードと上書き)をブラウザから直接コミットで済ませられます。</div>
+      <div class="subh">ZMK Studio との違い</div>
+      <div class="htxt">
+ZMKには <a class="hext" href="https://zmk.studio/" target="_blank" rel="noopener">ZMK Studio</a> という公式ツールがあり、キーボードをUSB接続して<b>ビルドなしでその場でキー配置を変更</b>できます。手軽さでは Studio が上です。<br><br>
+ただし Studio には「<b>ファームウェアに最初から入っている動作しか割り当てられない</b>」という制約があります。新しい動作を定義することはできません（ZMK公式が「対応予定なし」と明記しています）。<br><br>
+このツールの <b>US⇄JIS変換</b>は、まさにその「新しい動作の定義」（mod-morph の自動生成）を行うため、<b>Studioでは実現できません</b>。Combo・Conditional Layer・Macro の詳細設定も Studio では未対応です。<br><br>
+<b>使い分け</b>: 配置を少し入れ替えるだけなら Studio、記号の配置・JIS対応・Combo・Macro などを設計するならこのツール、という関係です。なお Studio を使い始めると <kbd>.keymap</kbd> の変更が反映されなくなるため、併用する場合は Studio 側で「Restore Stock Settings」が必要です。
+      </div>
       <div class="subh">はじめての方へ</div>
       <div class="htxt">
 まずは気軽に触ってみてください。どの操作も <kbd>Ctrl+Z</kbd> で元に戻せます。大きな変更の前には「☰ メニュー」の「バックアップ」でJSONファイルを保存しておくと安心です。困ったときは各画面の <b>?</b> マークに説明があります。
@@ -775,7 +910,7 @@ ZMKファームウェア用のキーマップエディタです。ブラウザ�
       <dl class="hdl">
         <dt>レイヤー切替</dt><dd>レイヤータブをクリックします。</dd>
         <dt>元に戻す / やり直す</dt><dd>画面上部の ↶ ↷ ボタン、または <kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Y</kbd>(直近50件)。</dd>
-        <dt>レイヤー・グループの操作</dt><dd>追加は各グループ行右端の「＋」(レイヤー)と最下段の「＋ グループ」。複製・削除はタブにマウスを乗せると出る ⧉ / ✕。並べ替えはタブやグループ名の<b>ドラッグ&ドロップ</b>(グループ名横の ▲▼ でも可)。番号と参照はすべて自動で追従します。</dd>
+        <dt>レイヤー・環境の操作</dt><dd>追加は各環境行右端の「＋」(レイヤー)と最下段の「＋ 環境」。複製・削除はタブにマウスを乗せると出る ⧉ / ✕。並べ替えはタブや環境名の<b>ドラッグ&ドロップ</b>(環境名横の ▲▼ でも可)。番号と参照はすべて自動で追従します。</dd>
         <dt>バックアップ</dt><dd>「☰ メニュー」の「バックアップ」でJSON保存。「読み込み」に渡すと完全復元できます。</dd>
       </dl>
     </div>
@@ -838,16 +973,19 @@ OSのキーボード設定が「日本語(JIS)」のPCでは、US配列想定の
 Shiftの有無で記号が変わるキー(<kbd>'</kbd> と <kbd>"</kbd> など)は、mod-morph(jis_*)を自動生成して対応します。変換ボタンは差異があるときだけ有効になり(件数表示)、実行前に対象キーの一覧で確認・選択できます。逆方向(JIS→US)も可能です。US/JISの切り替えは <kbd>&to</kbd> をキーに割り当ててください(実番号は「№」で確認できます)。
       </div>
       <dl class="hdl">
+        <dt>レイヤー順序の点検</dt><dd>ZMKには「<b>レイヤー0は常に有効</b>」「<b>番号が大きいレイヤーが優先</b>」というルールがあります。そのため<b>共有レイヤー（マウス・Bluetoothなど）は、どの環境のレイヤーよりも後ろ（大きい番号）に置く必要があります</b>。前にあると、環境を切り替えたときに共有レイヤーを呼んでも反応しません。<br><br>「⇅ レイヤー順序を点検」で検出し、ワンクリックで並べ替えられます（レイヤー番号と参照は自動調整）。あわせて、環境の最初のレイヤーにある透過（▽）も検出します。透過の位置ではレイヤー0＝最初の環境の割り当てが出てしまうためです。<span class="dim">役立つ場面: 環境を切り替えたらマウス操作が効かなくなった、という不具合の原因がこれです。</span></dd>
+        <dt>グループ間変換（配列規格 / OS）</dt><dd>グループごとに<b>配列規格</b>（US・JIS・UK・ドイツ語・Dvorak）と<b>対象OS</b>（Windows・macOS・Linux）を指定でき、あるグループの配置をもう一方に合わせて作り直せます。配列とOSの両方が違う場合は同時に変換します。US⇄JIS変換もこの仕組みの一部です。<span class="dim">役立つ場面: 3種類以上の環境を1つのキーボードで使い分けるとき、それぞれのグループを1回の操作で揃えられます。</span></dd>
+        <dt>Win⇄Mac変換</dt><dd>WindowsとmacOSでは、同じ操作でも押すキーが異なります（コピーは <kbd>Ctrl+C</kbd> と <kbd>Cmd+C</kbd>、行頭移動は <kbd>Home</kbd> と <kbd>Cmd+←</kbd> など）。変換元のグループを元に、もう一方のOS向けの配置をまとめて作れます。日本語入力の切替（変換/無変換 ⇄ かな/英数）にも対応します。<span class="dim">役立つ場面: 会社ではWindows、自宅ではMacというように機種をまたぐとき、指の動きを変えずに済みます。US⇄JIS変換と同じく、実行前に差分を一覧で確認できます。</span></dd>
         <dt id="help-shift">Shift入力トグル</dt><dd>そのレイヤーで、Shiftを押しながらの記号打ちを使うかを指定します。「有効」のレイヤーだけJIS変換でmod-morphを生成し、キー右上にShift面を表示します。ショートカットの修飾同時押しには影響しません。<span class="dim">役立つ場面: ファンクション・マウス・Bluetooth用など記号打ちをしないレイヤーを「無効」にしておくと、不要なmod-morphが作られず、キーマップも表示もシンプルに保てます。</span></dd>
-        <dt>レイヤーグループ</dt><dd>US / GENERAL(共有) / JIS の3グループでレイヤーを管理します(追加も可能)。書き出し時はグループ番号を含む名前で保存されるため、グループが違えば同じレイヤー名を使えます。グループ名の左のラベルには色が付き、ラベル横の●からいつでも変更できます(初期値: US=青、JIS=シアン、GENERAL=アンバー)。<span class="dim">役立つ場面: US側とJIS側で対応するレイヤーに同じ名前を付けられるので、対応関係がひと目で分かります。</span></dd>
-        <dt>Windows互換チェック</dt><dd>メディアキーには、見た目は同じでも中身が異なる2種類のキーコードがあります(<kbd>K_MUTE</kbd> と <kbd>C_MUTE</kbd> など)。前者はWindowsが解釈しないため<b>押しても何も起きません</b>。「☰ メニュー → Windows互換チェック」で該当箇所を検出し、全OSで動作するキーコードへ一括置換できます。<span class="dim">役立つ場面: ミュートや再生停止が効かない原因の多くがこれです。書き出し時の整合性チェックでも自動で警告します。</span></dd>
+        <dt>環境と共有レイヤー</dt><dd>レイヤーは<b>環境</b>（キーボード配列 × OS）ごとにまとめて管理します。マウスやBluetoothのように環境に依存しない層は<b>共有</b>とし、<b>すべての環境より後ろ</b>に置きます。書き出し時はグループ番号を含む名前で保存されるため、グループが違えば同じレイヤー名を使えます。グループ名の左のラベルには色が付き、ラベル横の●からいつでも変更できます(初期値: US=青、JIS=シアン、GENERAL=アンバー)。<span class="dim">役立つ場面: US側とJIS側で対応するレイヤーに同じ名前を付けられるので、対応関係がひと目で分かります。</span></dd>
+        <dt>OS互換チェック</dt><dd>キーコードには、特定のOSだけが解釈しないものがあります。たとえばメディアキーは見た目が同じでも中身が2種類あり(<kbd>K_MUTE</kbd> と <kbd>C_MUTE</kbd>)、前者はWindowsとmacOSが解釈しないため<b>押しても何も起きません</b>。逆に <kbd>C_STOP</kbd> のようにWindowsだけ非対応のキーもあります。<br><br>「☰ メニュー → OS互換チェック」で<b>使用するOSを選ぶ</b>と、そのOSで反応しないキーを一覧表示し、代替キーへ一括置換できます。<span class="dim">補足: Linuxは最も対応範囲が広く、メディアキーはどちらの種類でも動作します。ただし <kbd>SYSREQ</kbd> や <kbd>LOCKING_CAPS</kbd> のような旧式のキー、<kbd>INT7</kbd>〜<kbd>INT9</kbd>・<kbd>LANG6</kbd>〜<kbd>LANG9</kbd> は非対応です。判定はZMK公式のキーコード一覧に基づいています。</span></dd>
         <dt>整合性チェック</dt><dd>書き出し・プレビュー時に、存在しないレイヤーへの参照や未定義ビヘイビアなどを自動で検査し、問題があれば一覧表示します。<span class="dim">役立つ場面: ビルドしてから気付くミスを、書き出す前に発見できます。</span></dd>
         <dt>バックアップ / 復元</dt><dd>全設定をJSONファイル1つで保存・完全復元できます。<span class="dim">役立つ場面: ブラウザのデータ削除や別PCへの移行、配列の試行錯誤前の保険に。</span></dd>
         <dt>チートシート</dt><dd>全レイヤー・コンボ・各種設定をまとめた印刷用HTMLを出力します(☰ メニュー)。<span class="dim">役立つ場面: 覚えるまでの間、手元に置く配列表として使えます。</span></dd>
         <dt>GitHub連携</dt><dd>「☰ メニュー → GitHub連携」でzmk-configリポジトリから直接keymapを読み込み、編集後そのままコミットできます。コミットするとGitHub Actionsのビルドが自動で始まります。<span class="dim">役立つ場面: ファイルのダウンロードとアップロードが不要になり、編集からビルドまでブラウザだけで完結します。</span><br><br><b>準備:</b> GitHubの Settings → Developer settings → Personal access tokens → Fine-grained tokens でトークンを作成し、対象リポジトリを選んで Repository permissions の Contents を「Read and write」に設定してください。トークンはこのブラウザにのみ保存され、通信先はGitHub APIだけです(共用PCでは「このブラウザに保存」のチェックを外してください)。</dd>
         <dt>キーボードプロファイル</dt><dd>「☰ メニュー → キーボード」で編集対象のキーボードを管理します。ZMKの物理レイアウト定義(key_physical_attrs)を含むファイルを読み込むと盤面を自動で再現でき、roBa以外のキーボードも編集できます。<span class="dim">役立つ場面: 複数のZMKキーボードを1つのツールで管理できます。</span></dd>
         <dt>キーテスター</dt><dd>キーボードから実際に入力して、OSに届いたキーと修飾の状態を確認できます(「☰ メニュー」)。<span class="dim">役立つ場面: ファームウェア書き込み後の動作確認や、JIS変換後に記号が正しく出るかのチェックに。</span></dd>
-        <dt>テーマ</dt><dd>自動(OSの設定に追従)/ ライト / ダークを「表示切り替え」行で切り替えられます。</dd>
+        <dt>テーマ・表示言語</dt><dd>テーマ(自動 / ライト / ダーク)と表示言語(日本語 / English)を「表示切り替え」行で切り替えられます。</dd>
       </dl>
     </div>
   </div>
@@ -859,7 +997,7 @@ Shiftの有無で記号が変わるキー(<kbd>'</kbd> と <kbd>"</kbd> など)�
  * 文字テーブル(LOCALE_CHARS) / .keymapパース / 生成 / 各機能ノードの
  * パース&パッチ / グループ・変換ユーティリティ / 表示ラベル
  * ============================================================ */
-const APP_VERSION = '1.6.0';
+const APP_VERSION = '2.5.0';
 
 let NUM_KEYS = 43;
 // roBa physical layout: [w,h,x,y,rot(centi-deg*100),rx,ry]
@@ -878,36 +1016,299 @@ let PHYS = ROBA_KEYS;
 // 行構造(書き出し整形用): [開始index, 左手キー数, 行の総キー数]
 const ROBA_ROWS = [[0,5,10],[10,6,12],[22,6,12],[34,6,9]];
 let ROWS = ROBA_ROWS;
-/* ---------- OS互換性の注意が必要なキーコード ----------
- * HIDの「キーボードページ」にあるメディアキー(K_*)は、Windowsが
- * 解釈しないため無反応になる。同じ機能で「コンシューマページ」の
- * C_* を使うと全OSで動作する。出典: zmk.dev/docs/keymaps/list-of-keycodes */
-const WIN_INCOMPATIBLE = {
-  K_MUTE:'C_MUTE', K_MUTE2:'C_MUTE',
-  K_VOLUME_UP:'C_VOLUME_UP', K_VOL_UP:'C_VOLUME_UP', K_VOLUME_UP2:'C_VOLUME_UP', K_VOL_UP2:'C_VOLUME_UP',
-  K_VOLUME_DOWN:'C_VOLUME_DOWN', K_VOL_DN:'C_VOLUME_DOWN', K_VOLUME_DOWN2:'C_VOLUME_DOWN', K_VOL_DN2:'C_VOLUME_DOWN',
-  K_PLAY_PAUSE:'C_PLAY_PAUSE', K_PP:'C_PLAY_PAUSE',
-  K_NEXT:'C_NEXT', K_PREVIOUS:'C_PREVIOUS', K_PREV:'C_PREVIOUS',
-  K_STOP2:'C_STOP', K_STOP3:'C_STOP', K_EJECT:'C_EJECT'
+/* ---------- 多言語対応 (ja / en) ----------
+ * 日本語をキーにした辞書。DOMを走査して text / title / data-tip /
+ * placeholder を差し替える。未登録の文字列はそのまま残す(安全側)。 */
+const I18N_EN = {
+'？ ヘルプ':'? Help','💾 .keymap書き出し':'💾 Export .keymap','☰ メニュー':'☰ Menu',
+'読み込み':'Open','バックアップ':'Backup','プレビュー':'Preview','チートシート':'Cheat sheet',
+'キーテスター':'Key tester','キーボード':'Keyboard','GitHub連携':'GitHub','OS互換チェック':'OS compatibility','使用するOS:':'Target OS:','代替キーに一括置換':'Replace all with alternatives','代替のないキーは変更されません':'Keys without an alternative are left as they are','使うOSで反応しないキーを見つける':'Find keys that do nothing on your OS',
+'リセット':'Reset',
+'レイヤー':'Layer','表示切り替え':'View','ビヘイビア設定':'Behaviors',
+'⇧ Shift入力: 無効':'⇧ Shift input: Off','⇧ Shift入力: 有効':'⇧ Shift input: On',
+'⇄ US→JIS変換':'⇄ US→JIS','⇄ JIS→US変換':'⇄ JIS→US','⌘ Win⇄Mac変換':'⌘ Win⇄Mac','⇆ 環境間の同期':'⇆ Sync environments','環境間の同期':'Environment sync','同じ操作感で別の環境を作る':'Recreate the same feel elsewhere','同じ操作感を別の環境で再現する':'Recreate the same feel in another environment','基準にする環境:':'Base environment:','合わせる環境:':'Target environment:','基準の環境:':'Base:','キーボード配列:':'Keyboard layout:','同期する':'Sync','＋ 環境を追加':'+ Add environment','＋ 環境':'+ Environment','共有':'Shared','ベース':'Base','環境':'Environment','⇅ レイヤー順序を点検':'⇅ Check layer order','レイヤー順序の点検':'Layer order check','環境を切り替えても正しく動くか':'Will it still work after switching','共有レイヤーを最後に移動':'Move shared layers to the end','レイヤー番号と参照は自動で調整されます':'Layer numbers and references are adjusted automatically','要修正':'Fix needed','注意':'Note','グループ間の変換':'Group conversion','配列規格とOSの違いを吸収する':'Bridge layout and OS differences','変換元の設定:':'Source settings:','変換先の設定:':'Target settings:','配列:':'Layout:','OS:':'OS:','指定しない':'Not specified',
+'⊞ Combo表示: OFF':'⊞ Show combos: Off','⊞ Combo表示: ON':'⊞ Show combos: On',
+'№ fw番号で表示':'№ Show firmware no.','№ グループ番号で表示':'№ Show group no.',
+'◐ テーマ: 自動':'◐ Theme: Auto','○ テーマ: ライト':'○ Theme: Light','● テーマ: ダーク':'● Theme: Dark',
+'⚙ 全体調整':'⚙ Global tuning','◉ トラックボール':'◉ Trackball','＋ グループ':'+ Group',
+'✕ 閉じる':'✕ Close','適用':'Apply','保存':'Save','クリア':'Clear','キャンセル':'Cancel',
+'フォームをクリア':'Clear form','変換を実行':'Convert','差分を確認':'Show differences',
+'✎ 編集':'✎ Edit','使用':'Use','新規作成':'New','未設定':'Not set','📋 コピー':'📋 Copy',
+'履歴をクリア':'Clear history','🎯 キー選択':'🎯 Pick key',
+'動作:':'Action:','通常:':'Default:','修飾時:':'With modifier:','ホールド時:':'On hold:','タップ時:':'On tap:',
+'ONにするレイヤー:':'Layer to activate:','レイヤー:':'Layer:','ホールド修飾:':'Hold modifier:',
+'名前:':'Name:','メッセージ:':'Message:','リポジトリ:':'Repository:','ブランチ:':'Branch:',
+'アクセストークン:':'Access token:','使用中:':'In use:','変換方向:':'Direction:','変換元:':'From:','変換先:':'To:',
+'このブラウザに保存':'Save in this browser','keymap:':'keymap:',
+'通常キー (&kp)':'Key press (&kp)','修飾+タップ (&mt)':'Mod-tap (&mt)','レイヤー+タップ (&lt)':'Layer-tap (&lt)',
+'押下中レイヤー (&mo)':'Momentary layer (&mo)','レイヤー移動 (&to)':'To layer (&to)',
+'レイヤートグル (&tog)':'Toggle layer (&tog)','スティッキーレイヤー (&sl)':'Sticky layer (&sl)',
+'透過 (&trans)':'Transparent (&trans)','無効 (&none)':'None (&none)','直接入力':'Raw input',
+'修飾キー (&kp)':'Modifier (&kp)','レイヤー押下中 (&mo)':'Momentary layer (&mo)',
+'既定':'Default','なし':'None','(使用しない)':'(not used)',
+'キー割り当て':'Key assignment','ヘルプ':'Help','全体調整':'Global tuning','マクロ':'Macro',
+'このツールについて':'About','基本操作':'Basics','キー表示の見かた':'Reading the keys',
+'ZMKの機能':'ZMK features','このツールの機能':'This tool',
+'書き出しました — このあとの手順':'Exported — what to do next',
+'接続設定':'Connection','ファイル':'Files','コミット':'Commit','プロファイルを追加':'Add profile',
+'文字':'Letters','数字':'Numbers','記号':'Symbols','基本':'Basic','移動':'Navigation',
+'修飾':'Modifiers','日本語':'Japanese IME','ファンクション':'Function','テンキー':'Numpad',
+'メディア':'Media','アプリ/ブラウザ':'Apps / Browser','電源':'Power','マウス':'Mouse',
+'特殊動作':'Special','RGBライト':'RGB light','カスタムビヘイビア':'Custom behaviors',
+'左クリック':'Left click','右クリック':'Right click','中クリック':'Middle click',
+'スクロール↑':'Scroll up','スクロール↓':'Scroll down','スクロール←':'Scroll left','スクロール→':'Scroll right',
+'ポインタ↑':'Pointer up','ポインタ↓':'Pointer down','ポインタ←':'Pointer left','ポインタ→':'Pointer right',
+'変換':'Henkan','無変換':'Muhenkan','かな':'Kana','半角/全角(JIS)':'Zenkaku/Hankaku (JIS)',
+'再生/停止':'Play / Pause','次曲':'Next track','前曲':'Previous track','停止':'Stop',
+'輝度+':'Brightness +','輝度-':'Brightness -','戻る':'Back','進む':'Forward','更新':'Reload',
+'検索':'Search','電卓':'Calculator','メール':'Mail','スリープ':'Sleep',
+'ブラウザHome':'Browser home','メニュー':'Menu','キーリピート':'Key repeat',
+'新規 mod-morph':'New mod-morph','新規 tap-dance':'New tap-dance','新規 マクロ':'New macro',
+'新規 Hold-Tap':'New hold-tap','新規 条件付きレイヤー':'New conditional layer','新規コンボ':'New combo',
+'＋ タップ動作を追加':'+ Add tap action','＋ ステップを追加':'+ Add step',
+'調整を保存':'Save tuning','タップ':'Tap','押す(押しっぱなし)':'Press (hold)','離す':'Release','待機':'Wait',
+'接続してファイル一覧を取得':'Connect and list files','コミットする':'Commit',
+'リポジトリを開く':'Open repository','ビルド状況(Actions)を開く':'Open build status (Actions)',
+'confも一緒にコミットする(トラックボール設定)':'Also commit .conf (trackball settings)',
+'レイアウト定義ファイルから読み取り':'Import from layout definition file',
+'＋ グリッド生成':'+ Create grid',
+'または簡易グリッドで作成 — キー数:':'Or create a simple grid — keys:',
+'レイヤー連携':'Layer integration','センサー設定':'Sensor settings',
+'保存(キーマップに反映)':'Save (applies to keymap)',
+'💾 roBa_R.conf をダウンロード':'💾 Download roBa_R.conf','📋 conf をコピー':'📋 Copy conf',
+'X反転':'Invert X','Y反転':'Invert Y','スクロールX反転':'Invert scroll X','スクロールY反転':'Invert scroll Y',
+'常時RUN':'Always awake','スマートアルゴリズム':'Smart algorithm',
+'オートマウスレイヤ:':'Auto-mouse layer:','スナイプCPI:':'Snipe CPI:','スナイプ分周:':'Snipe divisor:',
+'ポーリング:':'Polling:','取付回転:':'Rotation:',
+'この画面を開いたまま、キーボードを押してください':'Keep this window open and press a key',
+'画面のマーク':'On-screen marks',
+'通常のキー。そのまま「A」が入力されます。':'A plain key. Typing it produces "A".',
+'右上の小記号は、Shiftを押しながらのときの入力です。「Shift入力: 有効」のレイヤーの記号・数字キーにだけ表示されます(アルファベットはShiftで大文字になるだけのため表示しません)。':'The small mark in the corner is what Shift produces. It appears only on symbol and number keys of layers with "Shift input: On" (letters are omitted, since Shift merely capitalises them).',
+'下段(紫)は長押し(ホールド)時の動作です。短く押すと「I」、押しっぱなしでAlt。':'The purple line at the bottom is the hold action: tap for "I", hold for Alt.',
+'L# は、押しっぱなしでレイヤー#に切替。短く押すとスペースです。':'L# switches to that layer while held; a short press types a space.',
+'緑枠は mod-morph。通常は「,」、Shiftを押しながらだと「!」です。':'A green border marks a mod-morph: "," normally, "!" while Shift is held.',
+'上段(グレー)は動作の種別です。この例はBluetooth接続先0への切替。':'The grey line at the top is the kind of action. Here, switching to Bluetooth profile 0.',
+'▽ は透過。下で有効になっているレイヤーのキーがそのまま使われます。':'▽ is transparent: the key from the layer below is used.',
+'✕ は無効。押しても何も入力されません。':'✕ is none: pressing it does nothing.',
+'キーを割り当てる':'Assigning a key','キーを入れ替える・コピーする':'Swapping and copying keys','名前を変える':'Renaming',
+'そのほかの操作':'Everything else','レイヤー名':'Layer name','グループ名':'Group name','コンボ名':'Combo name',
+'履歴(新しい順)':'History (newest first)',
+'GitHub連携でこの手順を省く':'Use GitHub to skip these steps',
+'システム / Bluetooth':'System / Bluetooth','BT解除':'Clear BT','BT全解除':'Clear all BT',
+'USB/BLE切替':'Toggle USB/BLE','USB固定':'USB only','BLE固定':'BLE only','BT前へ':'BT prev','BT次へ':'BT next',
+'mod-morph(修飾キー押下時に別の動作)':'mod-morph','キー操作の列を1キーで再生':'Replay a key sequence with one key',
+'修飾キーで別の動作になるキー':'A key that changes with modifiers',
+'タップ回数で動作が変わるキー':'A key that changes with tap count',
+'カスタムの長押しキー':'Custom hold-tap key',
+'複数レイヤー同時ONで別レイヤーを自動ON':'Auto-activate a layer when others are on',
+'全キー共通の挙動設定':'Settings shared by all keys',
+'プロファイルの管理と切替':'Manage and switch profiles',
+'リポジトリから直接読み書き':'Read and write directly from a repository',
+'実際の入力を確認':'Check the actual input',
+'複数キー同時押しで別の動作を発動':'Trigger an action by pressing keys together',
+'OSごとの操作感を揃える':'Match the feel across operating systems'
 };
-/** バインディング内のWindows非互換キーコードを検出 */
-function findWinIncompatible(raw){
-  const t = (raw||'').trim().split(/\s+/);
-  const out = [];
-  for(const tk of t.slice(1)){
-    const inner = tk.replace(/^(?:L|R)[SCAG]\(|\)+$/g,'');
-    if(WIN_INCOMPATIBLE[inner]) out.push({from:inner, to:WIN_INCOMPATIBLE[inner]});
+let LANG = 'ja';
+function tr(s){
+  if(LANG==='ja' || s==null) return s;
+  const raw = String(s);
+  const k = raw.trim();
+  const v = I18N_EN[k];
+  if(v===undefined) return s;
+  return raw.replace(k, v);
+}
+function setLang(l){ LANG = l; }
+function getLang(){ return LANG; }
+
+/* ---------- Windows ⇄ macOS 操作感の相互変換 ----------
+ * 同じ「操作」を実現するキーの組み合わせがOSで異なるものを対にする。
+ * 上の PLATFORM_PAIRS が優先され、該当しない Ctrl系ショートカットは
+ * 一般則(Ctrl ⇄ Cmd)で入れ替える。US⇄JIS変換と同じく、実行前に
+ * 差分を一覧で確認できる。 */
+const PLATFORM_PAIRS = [
+  // [Windows, macOS, 説明]
+  ['&kp HOME',            '&kp LG(LEFT)',        '行頭へ'],
+  ['&kp END',             '&kp LG(RIGHT)',       '行末へ'],
+  ['&kp LC(HOME)',        '&kp LG(UP)',          '文書の先頭へ'],
+  ['&kp LC(END)',         '&kp LG(DOWN)',        '文書の末尾へ'],
+  ['&kp LS(HOME)',        '&kp LG(LS(LEFT))',    '行頭まで選択'],
+  ['&kp LS(END)',         '&kp LG(LS(RIGHT))',   '行末まで選択'],
+  ['&kp LC(LEFT)',        '&kp LA(LEFT)',        '単語単位で左へ'],
+  ['&kp LC(RIGHT)',       '&kp LA(RIGHT)',       '単語単位で右へ'],
+  ['&kp LC(LS(LEFT))',    '&kp LA(LS(LEFT))',    '単語単位で左を選択'],
+  ['&kp LC(LS(RIGHT))',   '&kp LA(LS(RIGHT))',   '単語単位で右を選択'],
+  ['&kp LC(BSPC)',        '&kp LA(BSPC)',        '単語単位で削除'],
+  ['&kp LC(DEL)',         '&kp LA(DEL)',         '単語単位で前方削除'],
+  ['&kp LA(TAB)',         '&kp LG(TAB)',         'アプリの切り替え'],
+  ['&kp LA(F4)',          '&kp LG(Q)',           'アプリの終了'],
+  ['&kp LS(LG(S))',       '&kp LG(LS(N4))',      '範囲スクリーンショット'],
+  ['&kp PSCRN',           '&kp LG(LS(N3))',      '画面全体のスクリーンショット'],
+  ['&kp INT_HENKAN',      '&kp LANG1',           'かな入力へ'],
+  ['&kp INT_MUHENKAN',    '&kp LANG2',           '英数入力へ'],
+  ['&kp LCTRL',           '&kp LGUI',            '主修飾キー(Ctrl / Cmd)'],
+  ['&kp LEFT_CONTROL',    '&kp LEFT_GUI',        '主修飾キー(Ctrl / Cmd)'],
+  ['&kp RCTRL',           '&kp RGUI',            '主修飾キー(右)'],
+  ['&mt LCTRL',           '&mt LGUI',            '主修飾キー(ホールド)']
+];
+/** 一般則: Ctrl+英数字 ⇄ Cmd+英数字 */
+function swapMainMod(raw, toMac){
+  const from = toMac? 'LC' : 'LG', to = toMac? 'LG' : 'LC';
+  return raw.replace(new RegExp('\\b'+from+'\\(([A-Z0-9_]+)\\)','g'), (m,inner)=>to+'('+inner+')');
+}
+/** 1バインディングをWin⇄Mac変換。dir='win2mac' | 'mac2win' */
+function convBindingPlatform(raw, dir){
+  const toMac = dir==='win2mac';
+  const src = (raw||'').trim();
+  for(const [win, mac, desc] of PLATFORM_PAIRS){
+    const a = toMac? win : mac, b = toMac? mac : win;
+    if(src===a) return {raw:b, desc};
+    // &mt LCTRL X のように後ろにパラメータが続く形
+    if(a.startsWith('&mt ') && src.startsWith(a+' ')) return {raw:b+src.slice(a.length), desc};
   }
+  const swapped = swapMainMod(src, toMac);
+  if(swapped!==src) return {raw:swapped, desc:'ショートカットの修飾キー'};
+  return {raw:src, desc:null};
+}
+
+/* ---------- OS互換性テーブル ----------
+ * 出典: https://zmk.dev/docs/keymaps/list-of-keycodes
+ * 値は各OSでの動作: 1=動作する / 0=動作しない / -1=不明
+ * 記載のないキーコードは「どのOSでも動作する」とみなす。
+ * alt があれば、より互換性の高い代替キーコードを示す。 */
+const OS_LIST = [
+  {id:'win',   name:'Windows'},
+  {id:'mac',   name:'macOS'},
+  {id:'linux', name:'Linux'},
+  {id:'ios',   name:'iOS'},
+  {id:'android', name:'Android'}
+];
+// [win, mac, linux, ios, android]
+const OS_COMPAT = {
+  // --- メディア: キーボードページ版はWindows/macOSが解釈しない ---
+  K_MUTE:        {s:[0,1,1,-1,1],  alt:'C_MUTE',        why:'メディアキー(キーボードページ)'},
+  K_MUTE2:       {s:[0,0,1,0,1],   alt:'C_MUTE',        why:'メディアキー(キーボードページ)'},
+  K_VOLUME_UP:   {s:[0,1,1,-1,1],  alt:'C_VOLUME_UP',   why:'メディアキー(キーボードページ)'},
+  K_VOL_UP:      {s:[0,1,1,-1,1],  alt:'C_VOLUME_UP',   why:'メディアキー(キーボードページ)'},
+  K_VOLUME_UP2:  {s:[0,0,1,0,1],   alt:'C_VOLUME_UP',   why:'メディアキー(キーボードページ)'},
+  K_VOL_UP2:     {s:[0,0,1,0,1],   alt:'C_VOLUME_UP',   why:'メディアキー(キーボードページ)'},
+  K_VOLUME_DOWN: {s:[0,1,1,-1,1],  alt:'C_VOLUME_DOWN', why:'メディアキー(キーボードページ)'},
+  K_VOL_DN:      {s:[0,1,1,-1,1],  alt:'C_VOLUME_DOWN', why:'メディアキー(キーボードページ)'},
+  K_VOLUME_DOWN2:{s:[0,0,1,0,1],   alt:'C_VOLUME_DOWN', why:'メディアキー(キーボードページ)'},
+  K_VOL_DN2:     {s:[0,0,1,0,1],   alt:'C_VOLUME_DOWN', why:'メディアキー(キーボードページ)'},
+  K_PLAY_PAUSE:  {s:[0,0,1,0,1],   alt:'C_PLAY_PAUSE',  why:'メディアキー(キーボードページ)'},
+  K_PP:          {s:[0,0,1,0,1],   alt:'C_PLAY_PAUSE',  why:'メディアキー(キーボードページ)'},
+  K_NEXT:        {s:[0,0,1,0,1],   alt:'C_NEXT',        why:'メディアキー(キーボードページ)'},
+  K_PREVIOUS:    {s:[0,0,1,0,1],   alt:'C_PREVIOUS',    why:'メディアキー(キーボードページ)'},
+  K_PREV:        {s:[0,0,1,0,1],   alt:'C_PREVIOUS',    why:'メディアキー(キーボードページ)'},
+  K_STOP2:       {s:[0,0,1,0,1],   alt:'C_STOP',        why:'メディアキー(キーボードページ)'},
+  K_STOP3:       {s:[0,0,1,0,1],   alt:'C_STOP',        why:'メディアキー(キーボードページ)'},
+  K_EJECT:       {s:[-1,0,1,0,1],  alt:'C_EJECT',       why:'メディアキー(キーボードページ)'},
+  // --- コンシューマ側でも一部OSが非対応のもの ---
+  C_STOP:        {s:[0,-1,1,-1,1], alt:null, why:'Windowsが非対応'},
+  C_RECORD:      {s:[0,-1,1,-1,1], alt:null, why:'Windowsが非対応'},
+  C_REC:         {s:[0,-1,1,-1,1], alt:null, why:'Windowsが非対応'},
+  C_PIP:         {s:[0,-1,0,-1,1], alt:null, why:'Android以外は非対応'},
+  C_BASS_BOOST:  {s:[0,-1,1,-1,0], alt:null, why:'Linux以外は非対応'},
+  C_SLOW:        {s:[0,-1,1,-1,0], alt:null, why:'Linux以外は非対応'},
+  C_REPEAT:      {s:[0,-1,1,-1,0], alt:null, why:'Linux以外は非対応'},
+  C_BRIGHTNESS_MINIMUM:{s:[0,-1,1,-1,0], alt:null, why:'Linux以外は非対応'},
+  C_BRIGHTNESS_MAXIMUM:{s:[0,-1,1,-1,0], alt:null, why:'Linux以外は非対応'},
+  C_BRIGHTNESS_AUTO:   {s:[0,-1,1,-1,0], alt:null, why:'Linux以外は非対応'},
+  C_BACKLIGHT_TOGGLE:  {s:[0,-1,1,-1,0], alt:null, why:'Linux以外は非対応'},
+  C_ASPECT:      {s:[0,-1,1,-1,0], alt:null, why:'Linux以外は非対応'},
+  // --- 編集操作: Ctrl/Cmd の組み合わせを使うのが確実 ---
+  C_AC_CUT:      {s:[0,0,1,-1,0], alt:null, why:'Linux以外は非対応。Ctrl+X / Cmd+X を推奨'},
+  C_AC_COPY:     {s:[0,0,1,-1,0], alt:null, why:'Linux以外は非対応。Ctrl+C / Cmd+C を推奨'},
+  C_AC_PASTE:    {s:[0,0,1,-1,0], alt:null, why:'Linux以外は非対応。Ctrl+V / Cmd+V を推奨'},
+  C_AC_UNDO:     {s:[0,0,1,-1,0], alt:null, why:'Linux以外は非対応。Ctrl+Z / Cmd+Z を推奨'},
+  C_AC_REDO:     {s:[0,0,1,-1,0], alt:null, why:'Linux以外は非対応'},
+  K_CUT:         {s:[0,0,1,-1,0], alt:null, why:'macOSでは反応するが何も起きない。Ctrl+X / Cmd+X を推奨'},
+  K_COPY:        {s:[0,0,1,-1,0], alt:null, why:'macOSでは反応するが何も起きない。Ctrl+C / Cmd+C を推奨'},
+  K_PASTE:       {s:[0,0,1,-1,0], alt:null, why:'macOSでは反応するが何も起きない。Ctrl+V / Cmd+V を推奨'},
+  K_UNDO:        {s:[0,0,1,-1,0], alt:null, why:'macOSでは反応するが何も起きない。Ctrl+Z / Cmd+Z を推奨'},
+  K_AGAIN:       {s:[0,0,1,-1,0], alt:null, why:'macOSでは反応するが何も起きない'},
+  K_REDO:        {s:[0,0,1,-1,0], alt:null, why:'macOSでは反応するが何も起きない'},
+  // --- ほぼどのOSでも動作しない旧式のキー ---
+  RETURN2:       {s:[0,-1,0,-1,0], alt:'RET',  why:'ほとんどのOSが非対応'},
+  RET2:          {s:[0,-1,0,-1,0], alt:'RET',  why:'ほとんどのOSが非対応'},
+  LOCKING_CAPS:  {s:[0,-1,0,-1,0], alt:'CAPS', why:'ほとんどのOSが非対応'},
+  LCAPS:         {s:[0,-1,0,-1,0], alt:'CAPS', why:'ほとんどのOSが非対応'},
+  LOCKING_NUM:   {s:[-1,-1,0,-1,0], alt:'KP_NUMLOCK', why:'ほとんどのOSが非対応'},
+  LNLCK:         {s:[-1,-1,0,-1,0], alt:'KP_NUMLOCK', why:'ほとんどのOSが非対応'},
+  LOCKING_SCROLL:{s:[1,-1,0,-1,0], alt:'SLCK', why:'Windows以外は非対応'},
+  LSLCK:         {s:[1,-1,0,-1,0], alt:'SLCK', why:'Windows以外は非対応'},
+  ALT_ERASE:     {s:[-1,-1,0,-1,0], alt:null, why:'ほとんどのOSが非対応'},
+  SYSREQ:        {s:[-1,-1,0,-1,0], alt:null, why:'ほとんどのOSが非対応'},
+  ATTENTION:     {s:[-1,-1,0,-1,0], alt:null, why:'ほとんどのOSが非対応'},
+  K_CANCEL:      {s:[-1,-1,0,-1,0], alt:null, why:'ほとんどのOSが非対応'},
+  CLEAR_AGAIN:   {s:[-1,-1,0,-1,0], alt:null, why:'ほとんどのOSが非対応'},
+  CRSEL:         {s:[-1,-1,0,-1,0], alt:null, why:'ほとんどのOSが非対応'},
+  EXSEL:         {s:[-1,-1,0,-1,0], alt:null, why:'ほとんどのOSが非対応'},
+  PRIOR:         {s:[-1,-1,0,-1,0], alt:null, why:'ほとんどのOSが非対応'},
+  SEPARATOR:     {s:[-1,-1,0,-1,0], alt:null, why:'ほとんどのOSが非対応'},
+  OUT:           {s:[-1,-1,0,-1,0], alt:null, why:'ほとんどのOSが非対応'},
+  OPER:          {s:[-1,-1,0,-1,0], alt:null, why:'ほとんどのOSが非対応'},
+  K_EDIT:        {s:[-1,0,1,0,0],  alt:null, why:'Linux以外は非対応'},
+  KP_CLEAR:      {s:[-1,0,1,0,0],  alt:null, why:'Linux以外は非対応'},
+  KP_EQUAL_AS400:{s:[0,-1,0,-1,0], alt:'KP_EQUAL', why:'ほとんどのOSが非対応'},
+  KP_LEFT_PARENTHESIS:{s:[0,0,1,0,1], alt:'LPAR', why:'Windows/macOSが非対応'},
+  KP_LPAR:       {s:[0,0,1,0,1], alt:'LPAR', why:'Windows/macOSが非対応'},
+  KP_RIGHT_PARENTHESIS:{s:[0,0,1,0,1], alt:'RPAR', why:'Windows/macOSが非対応'},
+  KP_RPAR:       {s:[0,0,1,0,1], alt:'RPAR', why:'Windows/macOSが非対応'},
+  // --- 国際化キー: macOS以外は非対応 ---
+  INTERNATIONAL_7:{s:[-1,1,0,-1,0], alt:null, why:'macOS以外は非対応'},
+  INT7:          {s:[-1,1,0,-1,0], alt:null, why:'macOS以外は非対応'},
+  INTERNATIONAL_8:{s:[-1,1,0,-1,0], alt:null, why:'macOS以外は非対応'},
+  INT8:          {s:[-1,1,0,-1,0], alt:null, why:'macOS以外は非対応'},
+  INTERNATIONAL_9:{s:[-1,1,0,-1,0], alt:null, why:'macOS以外は非対応'},
+  INT9:          {s:[-1,1,0,-1,0], alt:null, why:'macOS以外は非対応'},
+  LANGUAGE_6:    {s:[-1,1,0,-1,0], alt:null, why:'macOS以外は非対応'},
+  LANG6:         {s:[-1,1,0,-1,0], alt:null, why:'macOS以外は非対応'},
+  LANGUAGE_7:    {s:[-1,1,0,-1,0], alt:null, why:'macOS以外は非対応'},
+  LANG7:         {s:[-1,1,0,-1,0], alt:null, why:'macOS以外は非対応'},
+  LANGUAGE_8:    {s:[-1,1,0,-1,0], alt:null, why:'macOS以外は非対応'},
+  LANG8:         {s:[-1,1,0,-1,0], alt:null, why:'macOS以外は非対応'},
+  LANGUAGE_9:    {s:[-1,1,0,-1,0], alt:null, why:'macOS以外は非対応'},
+  LANG9:         {s:[-1,1,0,-1,0], alt:null, why:'macOS以外は非対応'}
+};
+const OS_INDEX = {win:0, mac:1, linux:2, ios:3, android:4};
+/** バインディングに含まれるキーコードを取り出す(修飾ラッパーの中身も含む) */
+function keycodesIn(raw){
+  const t = (raw||'').trim().split(/\s+/).slice(1);
+  const out = [];
+  t.forEach(tk=>{
+    tk.split(/[()]+/).filter(Boolean).forEach(x=>{
+      if(/^[A-Z][A-Z0-9_]*$/.test(x)) out.push(x);
+    });
+  });
   return out;
 }
-/** バインディングをWindows互換のキーコードに置き換える */
-function fixWinIncompatible(raw){
+/** 指定OS群で問題になるキーコードを検出。targets 省略時は全OS */
+function findOsIssues(raw, targets){
+  const oses = targets && targets.length? targets : OS_LIST.map(o=>o.id);
+  const out = [];
+  keycodesIn(raw).forEach(kc=>{
+    const info = OS_COMPAT[kc];
+    if(!info) return;
+    const bad = oses.filter(o=> info.s[OS_INDEX[o]]===0);
+    if(bad.length) out.push({kc, bad, alt:info.alt, why:info.why});
+  });
+  return out;
+}
+/** 代替キーコードがあるものを置き換える */
+function fixOsIssues(raw, targets){
   let s = raw;
-  for(const k in WIN_INCOMPATIBLE){
-    s = s.replace(new RegExp('(^|[\\s(])'+k+'(?=$|[\\s)])','g'), (m,p1)=>p1+WIN_INCOMPATIBLE[k]);
-  }
+  findOsIssues(raw, targets).forEach(x=>{
+    if(!x.alt) return;
+    s = s.replace(new RegExp('(^|[\\s(])'+x.kc+'(?=$|[\\s)])','g'), (m,p1)=>p1+x.alt);
+  });
   return s;
 }
+// 後方互換(既存コードから参照される旧API)
+function findWinIncompatible(raw){
+  return findOsIssues(raw, ['win']).filter(x=>x.alt).map(x=>({from:x.kc, to:x.alt}));
+}
+function fixWinIncompatible(raw){ return fixOsIssues(raw, ['win']); }
 
 /* ---------- GitHub連携ヘルパ(DOM非依存) ---------- */
 /** "owner/repo" 形式や各種GitHub URLからowner/repoを取り出す */
@@ -1661,7 +2062,7 @@ function genConf(c){
   return L.join('\n')+'\n';
 }
 
-/* ---------- 固定レイヤーグループ構成 (計12レイヤー) ----------
+/* ---------- 既定の環境構成 (計12レイヤー) ----------
    USグループ:      fw 0-4  (US_01〜US_05)
    GENERALグループ: fw 5-6  (GEN_01:BT系 / GEN_02:マウス — US/JIS共有)
    JISグループ:     fw 7-11 (JIS_01〜JIS_05 = US_01〜US_05のJIS版) */
@@ -1680,7 +2081,7 @@ function convertAllToJis(state){
   return [...new Set(allWarns)];
 }
 
-/* ---------- レイヤーグループ(動的) ---------- */
+/* ---------- 環境 / 共有レイヤー(動的) ---------- */
 function groupRanges(groups){
   const out=[]; let s=0;
   for(const g of (groups||[])){ out.push({name:g.name, count:g.count, start:s}); s += g.count; }
@@ -1753,12 +2154,194 @@ function normBinding(b){ return b.trim().split(/\s+/).map((tk,i)=> i===0? tk : (
 const US_CHARS = {N1:['1','!'],N2:['2','@'],N3:['3','#'],N4:['4','$'],N5:['5','%'],N6:['6','^'],N7:['7','&'],N8:['8','*'],N9:['9','('],N0:['0',')'],
 MINUS:['-','_'],EQUAL:['=','+'],LBKT:['[','{'],RBKT:[']','}'],BSLH:['\\','|'],SEMI:[';',':'],SQT:["'",'"'],GRAVE:['`','~'],COMMA:[',','<'],DOT:['.','>'],FSLH:['/','?'],INT1:['\\','_'],INT3:['\\','|'],NUHS:['#','~']};
 const JIS_CHARS = {N1:['1','!'],N2:['2','"'],N3:['3','#'],N4:['4','$'],N5:['5','%'],N6:['6','&'],N7:['7',"'"],N8:['8','('],N9:['9',')'],N0:['0',''],
-MINUS:['-','='],EQUAL:['^','~'],LBKT:['@','`'],RBKT:['[','{'],BSLH:[']','}'],NUHS:[']','}'],SEMI:[';','+'],SQT:[':','*'],GRAVE:['半/全',''],COMMA:[',','<'],DOT:['.','>'],FSLH:['/','?'],INT1:['\\','_'],INT3:['¥','|']};
+MINUS:['-','='],EQUAL:['^','~'],LBKT:['@','`'],RBKT:['[','{'],NUHS:[']','}'],BSLH:[']','}'],SEMI:[';','+'],SQT:[':','*'],GRAVE:['半/全',''],COMMA:[',','<'],DOT:['.','>'],FSLH:['/','?'],INT1:['\\','_'],INT3:['¥','|']};
 const SYM_TO_LS = {EXCL:'N1',AT:'N2',HASH:'N3',DLLR:'N4',PRCNT:'N5',CARET:'N6',AMPS:'N7',ASTRK:'N8',LPAR:'N9',RPAR:'N0',
 UNDER:'MINUS',PLUS:'EQUAL',LBRC:'LBKT',RBRC:'RBKT',PIPE:'BSLH',COLON:'SEMI',DQT:'SQT',TILDE:'GRAVE',LT:'COMMA',GT:'DOT',QMARK:'FSLH'};
 /* 配列(ロケール)→文字テーブルの辞書。汎用規格変換ではここに
  * ansi/iso/de等のテーブルを追加し、charForがそのまま対応する。 */
-const LOCALE_CHARS = { us: US_CHARS, jis: JIS_CHARS };
+// ISO配列(英国)。US配列との主な違いは @ " # ~ \ | と ISO余剰キー(NUBS)
+const UK_CHARS = {N1:['1','!'],N2:['2','"'],N3:['3','£'],N4:['4','$'],N5:['5','%'],N6:['6','^'],N7:['7','&'],N8:['8','*'],N9:['9','('],N0:['0',')'],
+MINUS:['-','_'],EQUAL:['=','+'],LBKT:['[','{'],RBKT:[']','}'],BSLH:['#','~'],SEMI:[';',':'],SQT:["'",'@'],GRAVE:['`','¬'],
+COMMA:[',','<'],DOT:['.','>'],FSLH:['/','?'],NUHS:['#','~'],NUBS:['\\','|']};
+// ドイツ語配列(QWERTZ)。記号位置が大きく異なる代表例
+const DE_CHARS = {N1:['1','!'],N2:['2','"'],N3:['3','§'],N4:['4','$'],N5:['5','%'],N6:['6','&'],N7:['7','/'],N8:['8','('],N9:['9',')'],N0:['0','='],
+MINUS:['ß','?'],EQUAL:['´','`'],LBKT:['ü','Ü'],RBKT:['+','*'],BSLH:['#',"'"],SEMI:['ö','Ö'],SQT:['ä','Ä'],GRAVE:['^','°'],
+COMMA:[',',';'],DOT:['.',':'],FSLH:['-','_'],NUBS:['<','>'],Y:['Z','Z'],Z:['Y','Y']};
+// Dvorak配列。記号だけでなく文字の並びそのものが異なる
+const DVORAK_CHARS = {
+N1:['1','!'],N2:['2','@'],N3:['3','#'],N4:['4','$'],N5:['5','%'],N6:['6','^'],N7:['7','&'],N8:['8','*'],N9:['9','('],N0:['0',')'],
+Q:["'",'"'],W:[',','<'],E:['.','>'],R:['P','P'],T:['Y','Y'],Y:['F','F'],U:['G','G'],I:['C','C'],O:['R','R'],P:['L','L'],
+A:['A','A'],S:['O','O'],D:['E','E'],F:['U','U'],G:['I','I'],H:['D','D'],J:['H','H'],K:['T','T'],L:['N','N'],
+Z:[';',':'],X:['Q','Q'],C:['J','J'],V:['K','K'],B:['X','X'],N:['B','B'],M:['M','M'],
+SEMI:['S','S'],SQT:['-','_'],LBKT:['/','?'],RBKT:['=','+'],
+COMMA:['W','W'],DOT:['V','V'],FSLH:['Z','Z'],MINUS:['[','{'],EQUAL:[']','}'],
+GRAVE:['`','~'],BSLH:['\\','|']};
+/* 文字キー(A〜Z)は、並びが同じ配列では「押した通りの文字」を補う。
+ * 表示にも使うため大文字で持つ(&kp A を "A" と描くため)。 */
+(function fillLetters(){
+  const LT = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
+  [US_CHARS, JIS_CHARS, UK_CHARS, DE_CHARS, DVORAK_CHARS].forEach(tbl=>{
+    LT.forEach(c=>{ if(!tbl[c]) tbl[c] = [c, c]; });
+  });
+})();
+const LOCALE_CHARS = { us: US_CHARS, ansi: US_CHARS, jis: JIS_CHARS, uk: UK_CHARS, de: DE_CHARS, dvorak: DVORAK_CHARS };
+/** 画面表示や変換先の選択肢に使う配列規格の一覧 */
+const LOCALE_LIST = [
+  {id:'us',   name:'US (ANSI)'},
+  {id:'jis',  name:'JIS (日本語)'},
+  {id:'uk',   name:'UK (ISO)'},
+  {id:'de',   name:'DE (ドイツ語 QWERTZ)'},
+  {id:'dvorak', name:'Dvorak'}
+];
+/* ---------- レイヤー順序の検査 ----------
+ * ZMKの仕様: レイヤー0は常に有効。押されたキーは「有効なレイヤーのうち
+ * 最も番号が大きいもの」の割り当てが使われる。
+ * したがって:
+ *  (a) 共有レイヤー(全環境から呼ぶ層)は、どの環境のベース層よりも
+ *      大きい番号でなければ、環境切替後に呼び出しても無視される。
+ *  (b) 環境のベース層に透過(&trans)があると、レイヤー0(＝最初の環境)の
+ *      割り当てがそこだけ漏れて出る。
+ * 出典: https://zmk.dev/docs/keymaps
+ * 引数の groups は [{name, count, shared?}] 形式。 */
+function isSharedGroup(g){
+  if(!g) return false;
+  if(g.shared!==undefined) return !!g.shared;
+  const n = (g.name||'').toUpperCase();
+  return n==='GEN' || n==='GENERAL' || n==='SHARED' || n==='共有';
+}
+/** 共有グループより後ろに環境グループがあるか調べる */
+function findOrderIssues(groups){
+  const rs = groupRanges(groups||[]);
+  const issues = [];
+  rs.forEach((r,i)=>{
+    if(!isSharedGroup(groups[i])) return;
+    const after = rs.filter((x,j)=> j>i && !isSharedGroup(groups[j]));
+    if(after.length){
+      issues.push({
+        kind:'shared-before-env',
+        sharedIndex:i,
+        sharedName:r.name,
+        blockedBy: after.map(x=>x.name)
+      });
+    }
+  });
+  return issues;
+}
+/** 共有グループを末尾へ回した並び順を返す。order[newIdx]=oldIdx */
+function orderWithSharedLast(groups){
+  const idx = groups.map((g,i)=>i);
+  const env = idx.filter(i=>!isSharedGroup(groups[i]));
+  const shared = idx.filter(i=>isSharedGroup(groups[i]));
+  return env.concat(shared);
+}
+/** 各環境グループのベース層(先頭レイヤー)に透過があるか */
+function findBaseTransIssues(groups, layers){
+  const rs = groupRanges(groups||[]);
+  const out = [];
+  rs.forEach((r,i)=>{
+    if(isSharedGroup(groups[i])) return;
+    if(r.start===0) return;              // レイヤー0自身は漏れる先がない
+    const L = layers[r.start];
+    if(!L) return;
+    const positions = [];
+    L.bindings.forEach((b,k)=>{ if(b.trim()==='&trans') positions.push(k); });
+    if(positions.length) out.push({groupIndex:i, groupName:r.name, layerIndex:r.start, positions});
+  });
+  return out;
+}
+
+/* ---------- 汎用の配列変換エンジン ----------
+ * 「キーコード → その配列で出る文字 → 変換先の配列で同じ文字を出すキーコード」
+ * という三段の写像で、任意の配列どうしを変換する。
+ * 変換先で Shift の有無が変わる場合は LS() を付け外しし、
+ * 素のキーが両面とも一致しない場合は mod-morph を作る。 */
+function localeIndex(loc){
+  const table = LOCALE_CHARS[loc] || LOCALE_CHARS.us;
+  const idx = {};
+  for(const key in table){
+    const [un, sh] = table[key];
+    if(un && idx[un]===undefined) idx[un] = {key, shifted:false};
+    if(sh && idx[sh]===undefined) idx[sh] = {key, shifted:true};
+  }
+  return idx;
+}
+const LOCALE_INDEX_CACHE = {};
+function getLocaleIndex(loc){
+  if(!LOCALE_INDEX_CACHE[loc]) LOCALE_INDEX_CACHE[loc] = localeIndex(loc);
+  return LOCALE_INDEX_CACHE[loc];
+}
+/** キーコード(LS()を含みうる)が from 配列で出す文字 */
+function charOfKeycode(kc, from){
+  const m = kc.match(/^(LS|RS)\((.+)\)$/);
+  if(m) return charFor(m[2].trim(), from, true);
+  const c = canon(kc);
+  if(SYM_TO_LS[c]) return charFor(SYM_TO_LS[c], from, true);
+  return charFor(c, from, false);
+}
+/** 文字を to 配列で出すためのキーコード表記。出せなければ null */
+function keycodeForChar(ch, to){
+  const hit = getLocaleIndex(to)[ch];
+  if(!hit) return null;
+  return hit.shifted? 'LS('+hit.key+')' : hit.key;
+}
+/** 1バインディングを from 配列 → to 配列へ変換
+ *  shiftMode=true のとき、素のキーは両面(Shiftあり/なし)を保つよう mod-morph を作る */
+function convBindingLocale(raw, from, to, shiftMode, morphSink){
+  const t = (raw||'').trim().split(/\s+/);
+  const b = t[0];
+  const warns = [];
+  if(from===to) return {raw, warns};
+  const one = (kc, allowMorph)=>{
+    if(/^(LC|LA|LG|RC|RA|RG)\(/.test(kc)) return {kc};   // ショートカットは触らない
+    const c = canon(kc);
+    const isPlain = !/^(LS|RS)\(/.test(kc) && !SYM_TO_LS[c];
+    if(isPlain && allowMorph){
+      const tbl = LOCALE_CHARS[from] || LOCALE_CHARS.us;
+      const pair = tbl[c];
+      if(pair && pair[0] && pair[1] && pair[0]!==pair[1]){
+        const a = keycodeForChar(pair[0], to);
+        const s = keycodeForChar(pair[1], to);
+        if(!a || !s) return {kc, warn:`「${pair[0]}${pair[1]?'/'+pair[1]:''}」は変換先の配列に存在しません`};
+        // 変換先でも1つのキーで両面が揃うならそのまま
+        const idx = getLocaleIndex(to);
+        if(!idx[pair[0]].shifted && idx[pair[1]].shifted && idx[pair[0]].key===idx[pair[1]].key){
+          return {kc: idx[pair[0]].key};
+        }
+        return {morph:{u:'&kp '+a, s:'&kp '+s, base:c}};
+      }
+    }
+    const ch = charOfKeycode(kc, from);
+    if(ch===null || ch===undefined) return {kc};          // 文字を伴わないキーはそのまま
+    // 元のキーコードのままで変換先でも同じ文字が出るなら書き換えない
+    // (EXCLAMATION のような読みやすい別名を保つため)
+    if(charOfKeycode(kc, to)===ch) return {kc};
+    const nk = keycodeForChar(ch, to);
+    if(!nk) return {kc, warn:`「${ch}」は変換先の配列に存在しません`};
+    return {kc: nk};
+  };
+  const finish = (r)=>{
+    if(r.warn) warns.push(r.warn);
+    if(r.morph){
+      const name = 'loc_'+to+'_'+r.morph.base.toLowerCase();
+      if(morphSink) morphSink(name, r.morph);
+      return {isMorph:true, name};
+    }
+    return {isMorph:false, kc:r.kc};
+  };
+  if(b==='&kp' && t.length>=2){
+    const r = finish(one(t.slice(1).join(''), !!shiftMode));
+    return {raw: r.isMorph? '&'+r.name : '&kp '+r.kc, warns};
+  }
+  if((b==='&mt'||b==='&lt') && t.length>=3){
+    const r = finish(one(t.slice(2).join(''), false));
+    return {raw:`${b} ${t[1]} ${r.kc}`, warns};
+  }
+  if(t.length>=3 && /^&/.test(b) && /^[A-Z]/.test(t[t.length-1])){
+    const r = finish(one(t[t.length-1], false));
+    return {raw: t.slice(0,-1).join(' ')+' '+r.kc, warns};
+  }
+  return {raw, warns};
+}
 function charFor(base, layout, shifted){
   const t = (LOCALE_CHARS[layout] || LOCALE_CHARS.us)[canon(base)];
   if(!t) return null;
@@ -1977,12 +2560,12 @@ const DEFAULT_KEYMAP = `#include <behaviors.dtsi>
 };
 `;
 
-if (typeof module !== 'undefined') module.exports = {parseKeymap, generateKeymap, convBinding, convBindingUs, remapRefsOnly, normBinding, convertLayerToJis, convertAllToJis, groupRanges, gnameFor, buildJisMaps, nodeNameFor, parseHoldtapOne, patchHoldtapOne, parseStickyOne, patchStickyOne, parseMacros, genMacrosInner, parseMacroSteps, genMacroBindings, parseCondLayers, genCondLayersInner, charFor, LOCALE_CHARS, SYM_TO_LS, parseRepoRef, utf8ToBase64, base64ToUtf8, pickConfigFiles, WIN_INCOMPATIBLE, findWinIncompatible, fixWinIncompatible, KEYBOARD, ROBA_PROFILE, setKeyboard, getKeyboard, parsePhysicalLayout, deriveRows, gridKeys, makeEmptyKeymap, APP_VERSION, canon, kcLabel, JIS_MAP, REV_MAP, US_TO_JIS_ORDER, tokenizeBindings, DEFAULT_KEYMAP, NUM_KEYS, bindingLabel, JIS_MORPHS, parseCombos, parseBehaviors, parseTrackball, patchTrackball, genConf, CONF_DEFAULTS, PHYS};
+if (typeof module !== 'undefined') module.exports = {parseKeymap, generateKeymap, convBinding, convBindingUs, remapRefsOnly, normBinding, convertLayerToJis, convertAllToJis, groupRanges, gnameFor, buildJisMaps, nodeNameFor, parseHoldtapOne, patchHoldtapOne, parseStickyOne, patchStickyOne, parseMacros, genMacrosInner, parseMacroSteps, genMacroBindings, parseCondLayers, genCondLayersInner, charFor, isSharedGroup, findOrderIssues, orderWithSharedLast, findBaseTransIssues, LOCALE_CHARS, LOCALE_LIST, localeIndex, getLocaleIndex, charOfKeycode, keycodeForChar, convBindingLocale, SYM_TO_LS, parseRepoRef, utf8ToBase64, base64ToUtf8, pickConfigFiles, I18N_EN, tr, setLang, getLang, OS_LIST, OS_COMPAT, OS_INDEX, keycodesIn, findOsIssues, fixOsIssues, PLATFORM_PAIRS, convBindingPlatform, swapMainMod, findWinIncompatible, fixWinIncompatible, KEYBOARD, ROBA_PROFILE, setKeyboard, getKeyboard, parsePhysicalLayout, deriveRows, gridKeys, makeEmptyKeymap, APP_VERSION, canon, kcLabel, JIS_MAP, REV_MAP, US_TO_JIS_ORDER, tokenizeBindings, DEFAULT_KEYMAP, NUM_KEYS, bindingLabel, JIS_MORPHS, parseCombos, parseBehaviors, parseTrackball, patchTrackball, genConf, CONF_DEFAULTS, PHYS};
 </script>
 
 <script>
 /* ================= UI =================
- * セクション: state管理(save/load/migrate/Undo) / レイヤーグループ操作 /
+ * セクション: state管理(save/load/migrate/Undo) / 環境・レイヤー操作 /
  * 盤面描画 / ピッカー / 変換ダイアログ / 各機能モーダル(Combo,Mod-Morph,
  * Tap-Dance,Hold-Tap,Macro,CondLayer,全体調整,トラックボール) /
  * バックアップ・検証 / チートシート / テーマ・ヘルプ / 初期化
@@ -2103,7 +2686,7 @@ function renameGroup(gi, newName){
   const old = state.groups[gi].name;
   if(name===old) return;
   if(state.groups.some((g,k)=>k!==gi && g.name===name)){ alert('同名のグループがあります'); return; }
-  if((old==='US'||old==='JIS') && !confirm(`グループ「${old}」はUS⇄JIS変換の対象名です。名前を変更すると変換機能が使えなくなります。続行しますか?`)) return;
+  if((old==='US'||old==='JIS') && !confirm(`「${old}」はUS⇄JIS変換が対象とする名前です。変更するとその機能が使えなくなります(環境間の同期は引き続き使えます)。続行しますか?`)) return;
   state.groups[gi].name = name;
 }
 function moveGroup(gi, dir){
@@ -2256,6 +2839,38 @@ let tabClick = {i:-1, t:0};
 let layerDragIdx = null, groupDragGi = null;
 
 /* ----- layer groups ----- */
+/** グループの配列規格。未設定なら名前から推測(US/JIS など従来の運用と互換) */
+function groupLocale(gi){
+  const g = state.groups[gi];
+  if(!g) return 'us';
+  if(g.locale) return g.locale;
+  const n = (g.name||'').toUpperCase();
+  if(n.indexOf('JIS')>=0) return 'jis';
+  if(n.indexOf('DVORAK')>=0) return 'dvorak';
+  if(n.indexOf('UK')>=0) return 'uk';
+  if(n==='DE' || n.indexOf('GERMAN')>=0) return 'de';
+  return 'us';
+}
+/** グループの対象OS。未設定なら null(共通) */
+function groupPlatform(gi){
+  const g = state.groups[gi];
+  if(!g) return null;
+  if(g.platform) return g.platform;
+  const n = (g.name||'').toUpperCase();
+  if(n.indexOf('MAC')>=0) return 'mac';
+  if(n.indexOf('WIN')>=0) return 'win';
+  if(n.indexOf('LINUX')>=0) return 'linux';
+  return null;
+}
+function groupIndexOfLayer(i){
+  const rs = groupRanges(state.groups||[]);
+  return rs.findIndex(r=>i>=r.start && i<r.start+r.count);
+}
+/** レイヤーの表示に使う配列規格 */
+function layerLocale(i){
+  const gi = groupIndexOfLayer(i);
+  return gi>=0? groupLocale(gi) : 'us';
+}
 function groupOf(i){
   if(!state || !state.groups) return 'MAIN';
   for(const r of groupRanges(state.groups)){ if(i>=r.start && i<r.start+r.count) return r.name; }
@@ -2419,7 +3034,7 @@ function renderComboOverlay(board){
 let dragIdx = null;
 function keyEl(raw, i){
   const el = document.createElement('div');
-  const lb = uiLabel(raw, groupOf(activeLayer)==='JIS'?'jis':'us', !!state.layers[activeLayer].shiftLayer);
+  const lb = uiLabel(raw, layerLocale(activeLayer), !!state.layers[activeLayer].shiftLayer);
   el.className='key'+(lb.cls?' '+lb.cls:'');
   el.title = raw + '  (pos '+i+')\nドラッグで入替 / Ctrl+ドロップで上書きコピー / レイヤータブへドロップで同位置にコピー';
   el.draggable = true;
@@ -2473,7 +3088,9 @@ function renderLayers(){
     const cls = r.name==='US'?'us': r.name==='JIS'?'jis': r.name==='GEN'?'gen':'oth';
     const gcol = state.groups[gi].color || null;
     const s=document.createElement('span'); s.className='lsep '+cls; s.textContent=r.name;
-    s.title = 'レイヤーグループ / ダブルクリックで名前変更';
+    const shared = isSharedGroup(state.groups[gi]);
+    s.title = (shared? '共有レイヤー(どの環境からも使う層)' : '環境(キーボード配列 × OS)')
+      + ' / ダブルクリックで名前変更';
     s.style.cursor = 'pointer';
     if(gcol){ s.style.color = gcol; s.style.borderLeftColor = gcol; }
     s.ondblclick = ()=>inlineEdit(s, r.name, v=>{ if(v) renameGroup(gi, v); renderAll(); });
@@ -2510,11 +3127,29 @@ function renderLayers(){
     // パレットを閉じた(確定した)ときだけ保存と再描画
     cp.onchange = ()=>{ save(); renderAll(); };
     row.appendChild(cp);
+    // 役割と設定を小さく添える
+    const role = document.createElement('span');
+    role.className = 'envrole ' + (shared? 'shared':'base');
+    role.textContent = shared? '共有' : (gi===0? 'ベース' : '環境');
+    role.title = shared
+      ? 'どの環境からも呼び出す層。全ての環境より後ろに置く必要があります'
+      : (gi===0? '起動時に有効になる環境。ここを基準に他の環境を作ります' : 'ベース環境から作られる環境');
+    row.appendChild(role);
+    if(!shared){
+      const meta = document.createElement('span');
+      meta.className = 'envmeta';
+      const locName = (LOCALE_LIST.find(l=>l.id===groupLocale(gi))||{}).name || groupLocale(gi);
+      const os = groupPlatform(gi);
+      const osName = os? ({win:'Windows',mac:'macOS',linux:'Linux'})[os]||os : '';
+      meta.textContent = locName + (osName? ' · '+osName : '');
+      meta.title = 'キーボード配列(OSの設定) と OS。「⇆ 環境間の同期」で設定できます';
+      row.appendChild(meta);
+    }
     const up=document.createElement('button'); up.className='gbtn'; up.textContent='▲';
-    up.title='グループを上へ移動(fw番号は自動で振り直し・参照も追従)'; up.disabled = gi===0;
+    up.title='上へ移動(レイヤー番号と参照は自動で調整されます)'; up.disabled = gi===0;
     up.onclick=()=>moveGroup(gi,-1);
     const dn=document.createElement('button'); dn.className='gbtn'; dn.textContent='▼';
-    dn.title='グループを下へ移動(fw番号は自動で振り直し・参照も追従)'; dn.disabled = gi===rs.length-1;
+    dn.title='下へ移動(レイヤー番号と参照は自動で調整されます)'; dn.disabled = gi===rs.length-1;
     dn.onclick=()=>moveGroup(gi,1);
     row.appendChild(up); row.appendChild(dn);
     for(let k=0;k<r.count;k++){
@@ -2567,7 +3202,7 @@ function renderLayers(){
     const addl = document.createElement('button');
     addl.className = 'gbtn';
     addl.textContent = '＋';
-    addl.title = '「'+r.name+'」グループにレイヤーを追加';
+    addl.title = '「'+r.name+'」にレイヤーを追加';
     addl.onclick = ()=>addLayerToGroup(gi);
     addl.ondragover = e=>{ if(layerDragIdx!==null){ e.preventDefault(); e.dataTransfer.dropEffect='move'; addl.classList.add('linsert'); } };
     addl.ondragleave = ()=>addl.classList.remove('linsert');
@@ -2585,8 +3220,8 @@ function renderLayers(){
   grow.className = 'lrow';
   const gadd = document.createElement('button');
   gadd.className = 'gbtn';
-  gadd.textContent = '＋ グループ';
-  gadd.title = 'レイヤーグループを末尾に追加';
+  gadd.textContent = '＋ 環境';
+  gadd.title = '環境(または共有レイヤー)を末尾に追加';
   gadd.onclick = addGroupFlow;
   grow.appendChild(gadd);
   grow.ondragover = e=>{ if(groupDragGi!==null){ e.preventDefault(); e.dataTransfer.dropEffect='move'; grow.classList.add('ginsert'); } };
@@ -2606,6 +3241,7 @@ function refreshLayerParamHts(){
   LAYER_PARAM_HTS = new Set((((state&&state.behaviors&&state.behaviors.hts)||[])).filter(h=>['&mo','&to','&tog','&sl'].includes(h.holdBeh)).map(h=>h.name));
 }
 function renderAll(){
+  if(typeof LANG!=='undefined' && LANG!=='ja') setTimeout(()=>{ try{ i18nWalk(document.body); }catch(e){} }, 0);
   if(state.keyboard && (KEYBOARD.id!==state.keyboard.id || NUM_KEYS!==state.keyboard.keyCount)) setKeyboard(state.keyboard);
   refreshLayerParamHts();
   renderLayers(); renderBoard();
@@ -3054,7 +3690,7 @@ function addLayerToGroup(gi){
   renderAll();
 }
 function addGroupFlow(){
-  const nn = prompt('新しいレイヤーグループの名前(半角英字):', 'EXTRA');
+  const nn = prompt('新しい環境の名前(半角英字)\n例: MAC / IPAD / LINUX\n共有レイヤーにする場合は SHARED と入力してください:', 'MAC');
   if(!nn) return;
   const name = nn.replace(/[^A-Za-z]/g,'').toUpperCase();
   if(!name){ alert('半角英字で入力してください'); return; }
@@ -3244,19 +3880,32 @@ function runValidation(){
     if(!m.steps.length) issues.push(`マクロ "${m.name}": ステップがありません`);
     if(m.steps.some(s=>s.type!=='wait' && !s.binding)) issues.push(`マクロ "${m.name}": 未設定のステップがあります`);
   });
-  // Windowsで無反応になるキーコードの検出
-  const winIssues = new Map();
-  const scanWin = (b, where)=>{
-    findWinIncompatible(b).forEach(x=>{
-      const key = x.from+'→'+x.to;
-      if(!winIssues.has(key)) winIssues.set(key, {x, places:[]});
-      winIssues.get(key).places.push(where);
+  // レイヤー順序の検査(ZMKの優先順位に起因する不具合)
+  findOrderIssues(state.groups||[]).forEach(x=>{
+    issues.push(`⚠ 共有レイヤー「${x.sharedName}」が ${x.blockedBy.join('・')} より前にあります。`
+      + `番号の大きいレイヤーが優先されるため、それらの環境に切り替えると共有レイヤーが効きません。`
+      + `「⇅ レイヤー順序を点検」で修正できます`);
+  });
+  findBaseTransIssues(state.groups||[], state.layers).forEach(x=>{
+    issues.push(`⚠ ${x.groupName} の最初のレイヤーに透過(▽)が ${x.positions.length} 箇所あります(pos ${x.positions.slice(0,6).join(',')}${x.positions.length>6?'…':''})。`
+      + `レイヤー0は常に有効なため、その位置だけ最初の環境の割り当てが出てしまいます`);
+  });
+
+  // 使用OSで無反応になるキーコードの検出
+  const osIssues = new Map();
+  const targets = (typeof osTargets!=='undefined' && osTargets.length)? osTargets : ['win','mac','linux'];
+  const scanOs = (b, where)=>{
+    findOsIssues(b, targets).forEach(x=>{
+      if(!osIssues.has(x.kc)) osIssues.set(x.kc, {x, n:0});
+      osIssues.get(x.kc).n++;
     });
   };
-  state.layers.forEach((L,li)=>L.bindings.forEach((b,ki)=>scanWin(b, gname(li)+' pos'+ki)));
-  state.combos.forEach(c=>scanWin(c.binding, 'Combo:'+c.name));
-  winIssues.forEach(v=>{
-    issues.push(`⚠ ${v.x.from} は Windows では反応しません(${v.places.length}箇所)。${v.x.to} への置き換えを推奨します — 「☰ メニュー → Windows互換チェック」で一括修正できます`);
+  state.layers.forEach((L,li)=>L.bindings.forEach((b,ki)=>scanOs(b, gname(li)+' pos'+ki)));
+  state.combos.forEach(c=>scanOs(c.binding, 'Combo:'+c.name));
+  osIssues.forEach(v=>{
+    const names = v.x.bad.map(id=>(OS_LIST.find(o=>o.id===id)||{}).name).join('/');
+    issues.push(`⚠ ${v.x.kc} は ${names} では反応しません(${v.n}箇所)。`
+      + (v.x.alt? `${v.x.alt} への置き換えを推奨します — ` : '') + '「☰ メニュー → OS互換チェック」で確認できます');
   });
   (state.condLayers||[]).forEach(c=>{
     c.ifLayers.forEach(x=>{ if(x<0||x>=n) issues.push(`条件付きレイヤー "${c.name}": 存在しないレイヤー ${x} を条件にしています`); });
@@ -3273,13 +3922,22 @@ document.getElementById('btn-export').onclick = ()=>{
     if(!confirm('問題が見つかりました:\n\n・'+issues.slice(0,10).join('\n・')+(issues.length>10?'\n…ほか'+(issues.length-10)+'件':'')+'\n\nこのまま書き出しますか?')) return;
   }
   const text = generateKeymap(state);
+  const gh = ghSettingsLoad();
+  const fname = (gh.keymapPath? gh.keymapPath.split('/').pop() : (state.keyboard? state.keyboard.id+'.keymap' : 'keymap.keymap'));
   const blob = new Blob([text], {type:'text/plain'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
-  a.download = 'roBa.keymap';
+  a.download = fname;
   a.click();
   URL.revokeObjectURL(a.href);
+  showExportGuide(fname);
 };
+/** 書き出したファイルの使い方を案内する(初めての人がここで詰まりやすい) */
+function showExportGuide(fname){
+  document.getElementById('exp-file').textContent = fname;
+  document.getElementById('exp-path').textContent = 'config/' + fname;
+  document.getElementById('export-bg').classList.add('open');
+}
 document.getElementById('btn-preview').onclick = ()=>{
   const issues = runValidation();
   if(issues.length) document.getElementById('warnings').innerHTML = '<div class="warnbox">'+esc('⚠ 整合性チェック:\n・'+issues.join('\n・'))+'</div>';
@@ -4118,7 +4776,7 @@ function cheatKeyHtml(raw, i, S, layout, shiftOn){
 }
 function cheatBoard(li, S){
   const L = state.layers[li];
-  const layout = groupOf(li)==='JIS'?'jis':'us';
+  const layout = layerLocale(li);
   const shiftOn = !!L.shiftLayer;
   let maxX=0,maxY=0; PHYS.forEach(p=>{maxX=Math.max(maxX,p[2]+p[0]);maxY=Math.max(maxY,p[3]+p[1]);});
   const W=Math.ceil(maxX*S+8), H=Math.ceil(maxY*S+20);
@@ -4138,9 +4796,9 @@ function cheatBoard(li, S){
 }
 function buildCheatSheet(){
   const S = 0.42;
-  const groupSections = groupRanges(state.groups||[{name:'MAIN',count:state.layers.length}]).map(r=>{
+  const groupSections = groupRanges(state.groups||[{name:'MAIN',count:state.layers.length}]).map((r,gi)=>{
     const boards = Array.from({length:r.count},(_,k)=> state.layers[r.start+k]? cheatBoard(r.start+k, S):'').join('');
-    return `<h2>${esc(r.name)} レイヤーグループ${r.name==='GEN'?'(US/JIS共有)':''}</h2>`+boards;
+    return `<h2>${esc(r.name)}${isSharedGroup(state.groups[gi])?' <span style="font-size:12px;color:#888">(共有)</span>':''}</h2>`+boards;
   }).join('');
   const comboRows = state.combos.map(c=>{
     const keys = c.keyPositions.map(p=>{ const b=state.layers[0]&&state.layers[0].bindings[p]; return b? String(uiLabel(b,'us').main) : p; }).join(' + ');
@@ -4224,33 +4882,311 @@ document.getElementById('btn-cheat').onclick = ()=>{
   setTimeout(()=>URL.revokeObjectURL(url), 30000);
 };
 
-/* ----- Windows互換チェック ----- */
-document.getElementById('btn-winfix').onclick = ()=>{
-  const found = [];
-  state.layers.forEach((L,li)=>L.bindings.forEach((b,ki)=>{
-    findWinIncompatible(b).forEach(x=>found.push({type:'layer', li, ki, b, x}));
-  }));
-  state.combos.forEach((c,ci)=>{
-    findWinIncompatible(c.binding).forEach(x=>found.push({type:'combo', ci, b:c.binding, x}));
-  });
-  if(!found.length){
-    document.getElementById('warnings').innerHTML = '<div class="warnbox">'+esc('✅ Windowsで反応しないキーコードは見つかりませんでした。')+'</div>';
+/* ----- グループ間変換(配列規格 + OS) ----- */
+let platPending = null;
+function fillLocaleSelect(el, val){
+  el.innerHTML = LOCALE_LIST.map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('');
+  el.value = val;
+}
+function fillOsSelect(el, val){
+  el.innerHTML = '<option value="">指定しない</option>' +
+    [['win','Windows'],['mac','macOS'],['linux','Linux']].map(([id,n])=>`<option value="${id}">${n}</option>`).join('');
+  el.value = val || '';
+}
+function platSyncFromGroups(){
+  const gi = Number(document.getElementById('plat-src').value);
+  const gj = Number(document.getElementById('plat-dst').value);
+  fillLocaleSelect(document.getElementById('plat-src-loc'), groupLocale(gi));
+  fillOsSelect(document.getElementById('plat-src-os'), groupPlatform(gi));
+  fillLocaleSelect(document.getElementById('plat-dst-loc'), groupLocale(gj));
+  fillOsSelect(document.getElementById('plat-dst-os'), groupPlatform(gj));
+}
+document.getElementById('btn-platform').onclick = ()=>{
+  const opts = state.groups.map((g,i)=>`<option value="${i}">${esc(g.name)}（${g.count}レイヤー）</option>`).join('');
+  const src = document.getElementById('plat-src'), dst = document.getElementById('plat-dst');
+  src.innerHTML = opts; dst.innerHTML = opts;
+  const curGi = groupIndexOfLayer(activeLayer);
+  if(curGi>=0) src.value = String(curGi);
+  dst.value = String(curGi+1<state.groups.length? curGi+1 : Math.max(0,state.groups.length-1));
+  platSyncFromGroups();
+  src.onchange = dst.onchange = platSyncFromGroups;
+  document.getElementById('plat-list').innerHTML = '';
+  document.getElementById('plat-actions').style.display = 'none';
+  platPending = null;
+  document.getElementById('plat-bg').classList.add('open');
+};
+/** 1バインディングを 配列+OS の両方について変換 */
+function convBindingFull(raw, srcLoc, dstLoc, srcOs, dstOs, shiftMode, morphSink){
+  let cur = raw, warns = [], descs = [];
+  if(srcLoc!==dstLoc){
+    const r = convBindingLocale(cur, srcLoc, dstLoc, shiftMode, morphSink);
+    if(r.raw!==cur) descs.push('配列');
+    cur = r.raw; warns = warns.concat(r.warns);
+  }
+  if(srcOs && dstOs && srcOs!==dstOs){
+    const dir = (srcOs==='win' && dstOs==='mac')? 'win2mac' : (srcOs==='mac' && dstOs==='win')? 'mac2win' : null;
+    if(dir){
+      const r = convBindingPlatform(cur, dir);
+      if(r.raw!==cur){ cur = r.raw; descs.push(r.desc||'OS'); }
+    }
+  }
+  return {raw:cur, warns, desc:descs.join(' / ')};
+}
+document.getElementById('plat-scan').onclick = ()=>{
+  const gi = Number(document.getElementById('plat-src').value);
+  const gj = Number(document.getElementById('plat-dst').value);
+  const srcLoc = document.getElementById('plat-src-loc').value;
+  const dstLoc = document.getElementById('plat-dst-loc').value;
+  const srcOs = document.getElementById('plat-src-os').value || null;
+  const dstOs = document.getElementById('plat-dst-os').value || null;
+  const list = document.getElementById('plat-list');
+  if(gi===gj){ list.innerHTML = '<div class="warnbox">変換元と変換先に同じグループが選ばれています。別のグループを選んでください。</div>'; return; }
+  if(srcLoc===dstLoc && (!srcOs || !dstOs || srcOs===dstOs)){
+    list.innerHTML = '<div class="warnbox">配列規格もOSも同じ設定です。どちらかを変えてください。</div>'; return;
+  }
+  const rs = groupRanges(state.groups);
+  const s = rs[gi], d = rs[gj];
+  const n = Math.min(s.count, d.count);
+  if(n===0){ list.innerHTML = '<div class="warnbox">レイヤーがありません。</div>'; return; }
+  const diffs = [], morphs = {}, warnSet = new Set();
+  for(let k=0;k<n;k++){
+    const S = state.layers[s.start+k], D = state.layers[d.start+k];
+    S.bindings.forEach((b,ki)=>{
+      const r = convBindingFull(b, srcLoc, dstLoc, srcOs, dstOs, !!S.shiftLayer, (nm,m)=>{ morphs[nm]=m; });
+      r.warns.forEach(w=>warnSet.add(w));
+      if(r.raw!==D.bindings[ki]) diffs.push({si:s.start+k, di:d.start+k, ki, before:D.bindings[ki], after:r.raw, desc:r.desc});
+    });
+  }
+  platPending = {gi, gj, srcLoc, dstLoc, srcOs, dstOs, n, diffs, morphs};
+  list.innerHTML = '';
+  const warns = [...warnSet];
+  if(warns.length){
+    const w = document.createElement('div'); w.className='warnbox'; w.style.marginBottom='8px';
+    w.textContent = '⚠ '+warns.slice(0,5).join(' / ')+(warns.length>5? ' ほか':'');
+    list.appendChild(w);
+  }
+  if(!diffs.length){
+    const ok = document.createElement('div'); ok.className='warnbox';
+    ok.textContent = '変換が必要な差異はありません。';
+    list.appendChild(ok);
+    document.getElementById('plat-actions').style.display = 'none';
     return;
   }
-  const summary = [...new Set(found.map(f=>f.x.from+' → '+f.x.to))];
-  const detail = found.slice(0,10).map(f=> f.type==='layer'? `${gname(f.li)} pos${f.ki}: ${f.b}` : `Combo ${state.combos[f.ci].name}: ${f.b}`);
-  const msg = `Windowsで反応しないキーコードが ${found.length} 箇所見つかりました。\n\n`+
-    `【置き換え内容】\n・`+summary.join('\n・')+`\n\n【該当箇所】\n・`+detail.join('\n・')+(found.length>10? `\n…ほか${found.length-10}箇所`:'')+
-    `\n\nこれらはHIDの「キーボードページ」のキーで、Windowsが解釈しないため無反応になります。\n`+
-    `同じ機能の「コンシューマページ」のキーに置き換えると、Windows・macOS・Linux・iOS・Androidすべてで動作します。\n\n置き換えますか?`;
-  if(!confirm(msg)) return;
-  state.layers.forEach(L=>{ L.bindings = L.bindings.map(fixWinIncompatible); });
-  state.combos.forEach(c=>{ c.binding = fixWinIncompatible(c.binding); });
-  state.behaviors.morphs.forEach(m=>{ m.b1 = fixWinIncompatible(m.b1); m.b2 = fixWinIncompatible(m.b2); });
-  state.behaviors.tds.forEach(t=>{ t.bindings = t.bindings.map(fixWinIncompatible); });
-  if(state.macros) state.macros.items.forEach(m=>{ m.steps.forEach(s=>{ if(s.binding) s.binding = fixWinIncompatible(s.binding); }); });
+  const head = document.createElement('div');
+  head.className = 'hint'; head.style.margin = '0 0 6px';
+  const locName = id=>(LOCALE_LIST.find(l=>l.id===id)||{}).name||id;
+  head.textContent = `${state.groups[gi].name}(${locName(srcLoc)}${srcOs? ' / '+srcOs:''}) を元に `
+    + `${state.groups[gj].name}(${locName(dstLoc)}${dstOs? ' / '+dstOs:''}) を更新します。`
+    + `先頭から${n}レイヤー分、差異 ${diffs.length} 件。`;
+  list.appendChild(head);
+  let cur = -1;
+  diffs.forEach((df,idx)=>{
+    if(df.si!==cur){
+      cur = df.si;
+      const h = document.createElement('div'); h.className='catlabel';
+      h.textContent = `${gname(df.si)} ${state.layers[df.si].name} → ${gname(df.di)} ${state.layers[df.di].name}`;
+      list.appendChild(h);
+    }
+    const row = document.createElement('label'); row.className='listrow'; row.style.cursor='pointer';
+    const cb = document.createElement('input'); cb.type='checkbox'; cb.checked=true; cb.dataset.n=idx;
+    row.appendChild(cb);
+    const sp = document.createElement('span');
+    sp.innerHTML = `<span class="dimtxt">pos ${df.ki}</span> <code style="font-size:10px">${esc(df.before)}</code> <span class="dimtxt">→</span> <code style="font-size:10px">${esc(df.after)}</code>`
+      + (df.desc? ` <span class="dimtxt">（${esc(df.desc)}）</span>`:'')
+      + (df.after.startsWith('&loc_')? ' <span style="color:var(--morph);font-size:11px">⚡ mod-morph生成</span>':'');
+    row.appendChild(sp);
+    list.appendChild(row);
+  });
+  document.getElementById('plat-actions').style.display = '';
+};
+document.getElementById('plat-cancel').onclick = ()=>{ platPending=null; closeModal('plat-bg'); };
+document.getElementById('plat-exec').onclick = ()=>{
+  if(!platPending) return;
+  const {gi, gj, srcLoc, dstLoc, srcOs, dstOs, diffs, morphs} = platPending;
+  const checked = new Set([...document.querySelectorAll('#plat-list input[type=checkbox]')].filter(c=>c.checked).map(c=>Number(c.dataset.n)));
+  let done=0; const usedMorphs = new Set();
+  diffs.forEach((df,idx)=>{
+    if(!checked.has(idx)) return;
+    state.layers[df.di].bindings[df.ki] = df.after;
+    if(df.after.startsWith('&loc_')) usedMorphs.add(df.after.slice(1));
+    done++;
+  });
+  // 使用された mod-morph をビヘイビア一覧へ登録
+  usedMorphs.forEach(nm=>{
+    const m = morphs[nm];
+    if(!m) return;
+    if(!state.behaviors.morphs.some(x=>x.name===nm)){
+      state.behaviors.morphs.push({name:nm, b1:m.u, b2:m.s, mods:['MOD_LSFT','MOD_RSFT'], keepMods:[]});
+    }
+  });
+  // グループの属性を記録し、Shift入力設定も揃える
+  state.groups[gi].locale = srcLoc; state.groups[gi].platform = srcOs || null;
+  state.groups[gj].locale = dstLoc; state.groups[gj].platform = dstOs || null;
+  const rs = groupRanges(state.groups);
+  const s = rs[gi], d = rs[gj];
+  for(let k=0;k<Math.min(s.count,d.count);k++){
+    state.layers[d.start+k].shiftLayer = !!state.layers[s.start+k].shiftLayer;
+  }
+  platPending = null;
+  closeModal('plat-bg');
   renderAll();
-  document.getElementById('warnings').innerHTML = '<div class="warnbox">'+esc(`✅ ${found.length}箇所を置き換えました(`+summary.join(' / ')+`)。書き出し(またはGitHubへコミット)して反映してください。`)+'</div>';
+  const locName = id=>(LOCALE_LIST.find(l=>l.id===id)||{}).name||id;
+  let msg = `✅ 変換を実行しました: ${done} キーを更新（${state.groups[gi].name} → ${state.groups[gj].name}）。`;
+  if(srcLoc!==dstLoc) msg += ` 配列: ${locName(srcLoc)} → ${locName(dstLoc)}。`;
+  if(srcOs && dstOs && srcOs!==dstOs) msg += ` OS: ${srcOs} → ${dstOs}。`;
+  if(usedMorphs.size) msg += ` mod-morph ${usedMorphs.size}件を追加しました。`;
+  document.getElementById('warnings').innerHTML = '<div class="warnbox">'+esc(msg)+'</div>';
+};
+
+/* ----- レイヤー順序の点検 ----- */
+function renderOrderCheck(){
+  const list = document.getElementById('order-list');
+  const acts = document.getElementById('order-actions');
+  list.innerHTML = '';
+  acts.style.display = 'none';
+  const ord = findOrderIssues(state.groups||[]);
+  const trs = findBaseTransIssues(state.groups||[], state.layers);
+  if(!ord.length && !trs.length){
+    list.innerHTML = '<div class="warnbox">'+esc('✅ 問題は見つかりませんでした。どの環境に切り替えても、共有レイヤーは正しく動作します。')+'</div>';
+    return;
+  }
+  ord.forEach(x=>{
+    const d = document.createElement('div'); d.className='listrow';
+    d.innerHTML = `<span class="lname" style="color:var(--danger)">要修正</span>`
+      + `<span>共有レイヤー <b>${esc(x.sharedName)}</b> が <b>${esc(x.blockedBy.join('・'))}</b> より前にあります。<br>`
+      + `<span class="dimtxt">これらの環境に切り替えると、番号の大きい環境レイヤーが優先されるため、`
+      + `共有レイヤー(マウスやBluetoothなど)を呼び出しても反応しません。</span></span>`;
+    list.appendChild(d);
+  });
+  trs.forEach(x=>{
+    const d = document.createElement('div'); d.className='listrow';
+    d.innerHTML = `<span class="lname" style="color:var(--warn)">注意</span>`
+      + `<span><b>${esc(x.groupName)}</b> の最初のレイヤーに透過(▽)が <b>${x.positions.length}箇所</b> あります`
+      + `<span class="dimtxt">（pos ${esc(x.positions.slice(0,8).join(', '))}${x.positions.length>8?' …':''}）</span><br>`
+      + `<span class="dimtxt">レイヤー0は常に有効なため、この位置だけ最初の環境の割り当てが出てしまいます。`
+      + `意図した動作でなければ、キーを直接割り当ててください。</span></span>`;
+    list.appendChild(d);
+  });
+  if(ord.length) acts.style.display = '';
+}
+document.getElementById('btn-order').onclick = ()=>{
+  renderOrderCheck();
+  document.getElementById('order-bg').classList.add('open');
+};
+document.getElementById('order-fix').onclick = ()=>{
+  const before = state.groups.map(g=>g.name).join(' → ');
+  const perm = orderWithSharedLast(state.groups);
+  if(perm.every((o,i)=>o===i)){ renderOrderCheck(); return; }
+  // グループを並べ替え、レイヤーもそれに合わせて移動する
+  const rs = groupRanges(state.groups);
+  const arr = perm.map(oldGi=>({g:state.groups[oldGi], idxs:Array.from({length:rs[oldGi].count},(_,x)=>rs[oldGi].start+x)}));
+  const order = [];
+  arr.forEach(a=>a.idxs.forEach(o=>order.push(o)));
+  state.groups = arr.map(a=>a.g);
+  applyOrder(order);
+  renderAll();
+  renderOrderCheck();
+  const after = state.groups.map(g=>g.name).join(' → ');
+  document.getElementById('warnings').innerHTML = '<div class="warnbox">'
+    + esc(`✅ レイヤーの並びを修正しました: ${before} → ${after}。レイヤー番号と参照はすべて自動で調整済みです。`)+'</div>';
+};
+
+/* ----- OS互換チェック ----- */
+function osTargetsLoad(){
+  try{ const v = JSON.parse(localStorage.getItem('roba_os_targets')||'null'); if(Array.isArray(v) && v.length) return v; }catch(e){}
+  return ['win','mac','linux'];
+}
+function osTargetsSave(v){ try{ localStorage.setItem('roba_os_targets', JSON.stringify(v)); }catch(e){} }
+let osTargets = osTargetsLoad();
+function renderOsTargets(){
+  const el = document.getElementById('os-targets');
+  el.innerHTML = '';
+  OS_LIST.forEach(o=>{
+    const s = document.createElement('span');
+    s.className = 'modcheck' + (osTargets.includes(o.id)? ' on':'');
+    s.textContent = o.name;
+    s.onclick = ()=>{
+      osTargets = osTargets.includes(o.id)? osTargets.filter(x=>x!==o.id) : osTargets.concat(o.id);
+      osTargetsSave(osTargets);
+      renderOsTargets();
+      osScan();
+    };
+    el.appendChild(s);
+  });
+}
+function collectOsIssues(){
+  const found = [];
+  state.layers.forEach((L,li)=>L.bindings.forEach((b,ki)=>{
+    findOsIssues(b, osTargets).forEach(x=>found.push({where:gname(li)+' pos'+ki, b, x, apply:()=>{ state.layers[li].bindings[ki] = fixOsIssues(b, osTargets); }}));
+  }));
+  state.combos.forEach((c,ci)=>{
+    findOsIssues(c.binding, osTargets).forEach(x=>found.push({where:'Combo '+c.name, b:c.binding, x, apply:()=>{ state.combos[ci].binding = fixOsIssues(c.binding, osTargets); }}));
+  });
+  (state.behaviors.morphs||[]).forEach((m,mi)=>{
+    ['b1','b2'].forEach(k=>{
+      findOsIssues(m[k], osTargets).forEach(x=>found.push({where:'Mod-Morph '+m.name, b:m[k], x, apply:()=>{ state.behaviors.morphs[mi][k] = fixOsIssues(m[k], osTargets); }}));
+    });
+  });
+  (state.behaviors.tds||[]).forEach((d,di)=>{
+    d.bindings.forEach((b,bi)=>{
+      findOsIssues(b, osTargets).forEach(x=>found.push({where:'Tap-Dance '+d.name, b, x, apply:()=>{ state.behaviors.tds[di].bindings[bi] = fixOsIssues(b, osTargets); }}));
+    });
+  });
+  ((state.macros&&state.macros.items)||[]).forEach((m,mi)=>{
+    m.steps.forEach((s,si)=>{
+      if(!s.binding) return;
+      findOsIssues(s.binding, osTargets).forEach(x=>found.push({where:'Macro '+m.name, b:s.binding, x, apply:()=>{ state.macros.items[mi].steps[si].binding = fixOsIssues(s.binding, osTargets); }}));
+    });
+  });
+  return found;
+}
+function osScan(){
+  const list = document.getElementById('os-list');
+  const found = collectOsIssues();
+  document.getElementById('os-actions').style.display = 'none';
+  if(!osTargets.length){ list.innerHTML = '<div class="warnbox">対象のOSを1つ以上選んでください。</div>'; return; }
+  if(!found.length){
+    list.innerHTML = '<div class="warnbox">'+esc('✅ 選択したOSで問題になるキーコードは見つかりませんでした。')+'</div>';
+    return;
+  }
+  const fixable = found.filter(f=>f.x.alt);
+  list.innerHTML = '';
+  const head = document.createElement('div');
+  head.className = 'hint'; head.style.margin = '0 0 6px';
+  head.textContent = `${found.length}箇所で注意が必要です（うち ${fixable.length} 箇所は自動で置き換えられます）。`;
+  list.appendChild(head);
+  const seen = new Map();
+  found.forEach(f=>{
+    const key = f.x.kc;
+    if(!seen.has(key)) seen.set(key, {x:f.x, places:[]});
+    seen.get(key).places.push(f.where);
+  });
+  seen.forEach(v=>{
+    const d = document.createElement('div'); d.className='listrow';
+    const badNames = v.x.bad.map(id=>(OS_LIST.find(o=>o.id===id)||{}).name).join(' / ');
+    d.innerHTML = `<span class="lname">${esc(v.x.kc)}</span>`+
+      `<span><b style="color:var(--danger)">${esc(badNames)}</b> <span class="dimtxt">で反応しません</span>`+
+      (v.x.alt? ` <span class="dimtxt">→</span> <b>${esc(v.x.alt)}</b> <span class="dimtxt">に置換できます</span>` : ' <span class="dimtxt">（代替なし）</span>')+
+      `<br><span class="dimtxt">${esc(v.x.why)}</span>`+
+      `<br><span class="dimtxt">${esc(v.places.slice(0,6).join(' / '))}${v.places.length>6? ' ほか'+(v.places.length-6)+'箇所':''}</span></span>`;
+    list.appendChild(d);
+  });
+  if(fixable.length) document.getElementById('os-actions').style.display = '';
+}
+document.getElementById('btn-winfix').onclick = ()=>{
+  renderOsTargets();
+  osScan();
+  document.getElementById('os-bg').classList.add('open');
+};
+document.getElementById('os-fix').onclick = ()=>{
+  const found = collectOsIssues().filter(f=>f.x.alt);
+  if(!found.length) return;
+  const summary = [...new Set(found.map(f=>f.x.kc+' → '+f.x.alt))];
+  if(!confirm(`次の置き換えを行います:\n\n・`+summary.join('\n・')+`\n\n対象 ${found.length} 箇所。よろしいですか?`)) return;
+  found.forEach(f=>f.apply());
+  renderAll();
+  closeModal('os-bg');
+  document.getElementById('warnings').innerHTML = '<div class="warnbox">'+esc(`✅ ${found.length}箇所を置き換えました（`+summary.join(' / ')+`）。`)+'</div>';
 };
 
 /* ----- GitHub連携 ----- */
@@ -4532,6 +5468,175 @@ document.addEventListener('keydown', e=>{
   }
 }, true);
 
+/* ----- ヘルプ本文の英語版 -----
+ * 日本語版のDOMを保存しておき、言語に応じて差し替える。
+ * 量が多いためHTML文字列として持つ。 */
+const HELP_EN = {
+'hp-about': `
+      <div class="htxt">
+A keymap editor for the ZMK firmware. It runs entirely in your browser and saves your work automatically.<br><br>
+The name <b>Zero Mess Keymapper</b> is a backronym of ZMK: it aims to bring the <i>mess</i> of keyboard layouts down to <i>zero</i>.
+      </div>
+      <div class="subh">What it can do</div>
+      <div class="htxt">
+・Edit your layout by clicking a picture of your keyboard<br>
+・Configure Combos, Mod-Morphs, Tap-Dances, Macros and the trackball<br>
+・Convert a US-layout design for a JIS-configured OS (US⇄JIS)<br>
+・Match the feel between Windows and macOS (Win⇄Mac)<br>
+・Read from and commit to your zmk-config repository on GitHub<br>
+・Switch the interface between Japanese and English
+      </div>
+      <div class="subh">Compared with other tools</div>
+      <dl class="hdl" style="margin-top:0">
+        <dt>Only here</dt>
+        <dd>・US⇄JIS conversion, including automatic mod-morph generation for Shift pairs<br>
+・Win⇄Mac conversion of shortcuts and IME keys<br>
+・OS compatibility check for keycodes your operating system ignores<br>
+・A per-layer "Shift input" switch, and keys that show the character actually typed<br>
+・Layer groups you can reorder, colour and convert between<br>
+・Trackball (PMW3610) settings for roBa<br>
+・No installation. Works offline in the browser.</dd>
+        <dt>Not possible here</dt>
+        <dd>・Writing to the keyboard directly. A build on GitHub Actions is required. For quick swaps, ZMK Studio is more convenient.<br>
+・Editing behaviors that take parameters (they are preserved untouched instead)</dd>
+      </dl>
+      <div class="subh">About .keymap files</div>
+      <div class="htxt">
+A <kbd>.keymap</kbd> file is a <b>blueprint</b>, not something you can put on the keyboard directly. It has to be built on GitHub into a <kbd>.uf2</kbd> firmware file.<br><br>
+This tool handles the editing; GitHub does the building (free and automatic). Compiling in the browser is not technically possible, so this split is common to every ZMK editor.
+      </div>
+      <div class="subh">Getting it onto the keyboard</div>
+      <div class="hstep"><span class="hnum">1</span><span>Save the file with "Export .keymap"</span></div>
+      <div class="hstep"><span class="hnum">2</span><span>Replace <kbd>config/&lt;name&gt;.keymap</kbd> in your GitHub repository</span></div>
+      <div class="hstep"><span class="hnum">3</span><span>GitHub Actions builds it automatically</span></div>
+      <div class="hstep"><span class="hnum">4</span><span>Copy the resulting .uf2 onto the keyboard</span></div>
+      <div class="hint">Only the trackball sensor settings need to go into <kbd>config/roBa_R.conf</kbd> separately.<br>Using "☰ Menu → GitHub" turns steps 1–2 into a single commit.</div>
+      <div class="subh">Compared with ZMK Studio</div>
+      <div class="htxt">
+<a class="hext" href="https://zmk.studio/" target="_blank" rel="noopener">ZMK Studio</a> is the official tool for changing a keymap over USB with no build step. For quick swaps it is more convenient.<br><br>
+However, Studio can only assign behaviors that are <b>already compiled into the firmware</b>; defining new ones is listed as "not planned" by ZMK. The US⇄JIS conversion here works precisely by defining new behaviors, so it cannot be reproduced in Studio. Combos, conditional layers and detailed macro settings are also unsupported there.<br><br>
+<b>In short</b>: use Studio to rearrange a few keys, use this tool to design symbol placement, JIS support, combos and macros. Note that once you use Studio, changes to the <kbd>.keymap</kbd> file no longer apply unless you run "Restore Stock Settings" in Studio.
+      </div>
+      <div class="subh">If you are new</div>
+      <div class="htxt">
+Feel free to experiment. Every action can be undone with <kbd>Ctrl+Z</kbd>. Before a big change, save a JSON file from "☰ Menu → Backup". The <b>?</b> marks throughout the interface explain each setting.
+      </div>`,
+
+'hp-ops': `
+      <div class="subh" style="border:none;padding-top:0;margin-top:0">Assigning a key</div>
+      <div class="htxt">Click a key on the board to open the assignment window. Category names can be collapsed, and the search box at the top filters the list.</div>
+      <div class="subh">Swapping and copying keys</div>
+      <div class="htxt">Drag a key onto another to <b>swap</b> them. Hold <kbd>Ctrl</kbd> while dropping to copy instead. Dropping onto a layer tab copies the key to the same position on that layer.</div>
+      <div class="subh">Renaming</div>
+      <div class="htxt">Layer tabs, group names, and the names of combos, mod-morphs and so on become editable when you <b>double-click</b> them. Press <kbd>Enter</kbd> to confirm or <kbd>Esc</kbd> to cancel.</div>
+      <div class="subh">Everything else</div>
+      <dl class="hdl">
+        <dt>Switching layers</dt><dd>Click a layer tab.</dd>
+        <dt>Undo / Redo</dt><dd>The ↶ ↷ buttons at the top, or <kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Y</kbd> (last 50 actions).</dd>
+        <dt>Adding and moving layers</dt><dd>Add with the "+" at the end of each group row, or "+ Group" at the bottom. Duplicate and delete with the ⧉ / ✕ icons that appear when hovering a tab. Drag tabs or group names to reorder; numbers and all references follow automatically.</dd>
+        <dt>Backup</dt><dd>"☰ Menu → Backup" saves everything as JSON. Feed the same file to "Open" to restore it completely.</dd>
+      </dl>`,
+
+'hp-zmk': `
+      <div class="subh" style="border:none;padding-top:0;margin-top:4px">What ZMK is</div>
+      <div class="htxt">
+ZMK is an open-source firmware for custom keyboards, known for solid Bluetooth support and low power consumption. It is widely used for wireless split keyboards such as roBa. Its configuration lives in a <kbd>.keymap</kbd> text file, which this tool generates for you.<br><br>
+<a class="hext" href="https://zmk.dev/docs" target="_blank" rel="noopener">ZMK documentation</a> /
+<a class="hext" href="https://zmk.dev/docs/keymaps/list-of-keycodes" target="_blank" rel="noopener">List of keycodes</a> /
+<a class="hext" href="https://zmk.dev/docs/keymaps/behaviors" target="_blank" rel="noopener">Behaviors</a> /
+<a class="hext" href="https://github.com/kumamuk-git/roBa" target="_blank" rel="noopener">roBa repository</a>
+      </div>
+      <div class="subh">Main features</div>
+      <dl class="hdl">
+        <dt>Layers</dt><dd>A whole alternative arrangement of the board. <span class="dim">Useful because a 42-key board can still reach numbers, symbols and function keys comfortably.</span></dd>
+        <dt>Transparent (▽) and none (✕)</dt><dd>▽ falls through to the layer below; ✕ does nothing. <span class="dim">Useful because you can define only the keys a layer changes.</span></dd>
+        <dt>Conditional Layer (tri-layer)</dt><dd>Turns on a layer automatically when the specified layers are all active. <span class="dim">Useful for reaching a third settings layer by holding two thumb keys.</span></dd>
+        <dt>Hold-Tap (&mt / &lt)</dt><dd>One key, two roles: a character when tapped, a modifier or layer when held. <span class="dim">Useful for home-row mods. Timing is adjusted in "Global tuning"; positional conditions can be set in "Hold-Tap".</span></dd>
+        <dt>Combo</dt><dd>Pressing several keys together produces a different action. <span class="dim">Useful for Esc or Tab without dedicating a key to them.</span></dd>
+        <dt>Mod-Morph</dt><dd>The key changes while a modifier is held. <span class="dim">Useful for putting "," and "!" on one key. Also how US⇄JIS conversion works internally.</span></dd>
+        <dt>Tap-Dance</dt><dd>The action depends on how many times you tap. <span class="dim">Useful for grouping related functions on one key.</span></dd>
+        <dt>Macro</dt><dd>Replays a sequence of key actions. <span class="dim">Useful for boilerplate text or chained shortcuts.</span></dd>
+        <dt>Sticky Key (SK)</dt><dd>Applies a modifier to just the next key you press. <span class="dim">Useful on small boards, avoiding held chords.</span></dd>
+        <dt>Caps Word</dt><dd>Capitalises only the next word. <span class="dim">Useful for constant names like MAX_SIZE.</span></dd>
+        <dt>Bluetooth</dt><dd>BT 0–4 switch between paired hosts; BOOT enters firmware flashing mode. <span class="dim">Useful for moving between a PC and a tablet with one key.</span></dd>
+      </dl>`,
+
+'hp-tool': `
+      <div class="subh" style="border:none;padding-top:0;margin-top:0">US⇄JIS conversion</div>
+      <div class="htxt">
+When the operating system is set to Japanese (JIS), a keymap designed for a US layout produces the wrong symbols — you press what should be <kbd>@</kbd> and get <kbd>"</kbd>. This feature rewrites your US-side layout into keycodes that produce <b>the same visible characters on a JIS-configured OS</b> and copies the result into the JIS group.<br><br>
+Keys whose symbol depends on Shift (<kbd>'</kbd> and <kbd>"</kbd>) are handled by generating mod-morph behaviors automatically. The button is only enabled when something actually differs (the count is shown), and you can review and pick the individual keys before applying. The reverse direction works too. Assign <kbd>&to</kbd> to a key to switch between the groups.
+      </div>
+      <dl class="hdl">
+        <dt>Group conversion (layout / OS)</dt><dd>Each group can declare a <b>layout standard</b> (US, JIS, UK, German, Dvorak) and a <b>target OS</b> (Windows, macOS, Linux). One group can then be rebuilt to match another, converting both at once where both differ. US⇄JIS conversion is one case of this. <span class="dim">Useful when you juggle three or more environments on one keyboard.</span></dd>
+        <dt>Win⇄Mac conversion</dt><dd>Windows and macOS need different keys for the same action — <kbd>Ctrl+C</kbd> versus <kbd>Cmd+C</kbd>, <kbd>Home</kbd> versus <kbd>Cmd+←</kbd>, Henkan/Muhenkan versus Kana/Eisu. <span class="dim">Useful when you move between a work Windows machine and a Mac at home.</span></dd>
+        <dt>Shift input switch</dt><dd>Declares whether a layer is used for typing symbols with Shift. Only such layers generate mod-morphs during conversion and show the Shift face in the corner of each key. It does not restrict modifier chords for shortcuts. <span class="dim">Useful for keeping function, mouse and Bluetooth layers free of unnecessary mod-morphs.</span></dd>
+        <dt>OS compatibility check</dt><dd>Some keycodes are silently ignored by particular operating systems. Media keys exist in two forms (<kbd>K_MUTE</kbd> and <kbd>C_MUTE</kbd>); the first does nothing on Windows or macOS. Conversely <kbd>C_STOP</kbd> only fails on Windows. Choose the systems you use and the tool lists every affected key and offers a one-click replacement. <span class="dim">Linux accepts the widest range, including both kinds of media key, but rejects legacy keys such as SYSREQ and LOCKING_CAPS, and INT7–INT9 / LANG6–LANG9. The data comes from ZMK's official keycode list.</span></dd>
+        <dt>Layer groups</dt><dd>Layers are organised into groups (US, GENERAL, JIS and any you add). Because exported node names include the group, two groups can use the same layer name. Group colours can be changed from the dot beside each label. <span class="dim">Useful for seeing at a glance which layers correspond to each other.</span></dd>
+        <dt>Validation</dt><dd>Before exporting or previewing, the tool checks for references to missing layers, undefined behaviors and similar mistakes. <span class="dim">Useful for catching errors before a build fails.</span></dd>
+        <dt>Backup and restore</dt><dd>Everything is saved to a single JSON file and restored completely from it.</dd>
+        <dt>Keyboard profiles</dt><dd>"☰ Menu → Keyboard" manages which keyboard you are editing. Load any file containing a ZMK physical layout definition and the board is rendered automatically.</dd>
+        <dt>Key tester</dt><dd>Type on your keyboard and see exactly what reaches the operating system. <span class="dim">Useful for checking a freshly flashed firmware, or that symbols come out right after conversion.</span></dd>
+        <dt>GitHub integration</dt><dd>Load and commit <kbd>.keymap</kbd> files straight from your zmk-config repository; the commit starts a build. <span class="dim">Create a fine-grained personal access token with Contents set to "Read and write" for that repository. The token is kept only in your browser and sent only to the GitHub API.</span></dd>
+        <dt>Cheat sheet</dt><dd>Prints every layer, combo and setting as a single HTML page.</dd>
+        <dt>Theme and language</dt><dd>Theme (auto / light / dark) and language (Japanese / English) are in the "View" row.</dd>
+      </dl>`
+};
+/** ヘルプ本文を言語に応じて差し替える。日本語版は初回に退避しておく */
+const HELP_JA_CACHE = {};
+function applyHelpLang(){
+  Object.keys(HELP_EN).forEach(id=>{
+    const el = document.getElementById(id);
+    if(!el) return;
+    if(HELP_JA_CACHE[id]===undefined) HELP_JA_CACHE[id] = el.innerHTML;
+    el.innerHTML = (LANG==='en')? HELP_EN[id] : HELP_JA_CACHE[id];
+  });
+}
+
+/* ----- 表示言語の切り替え ----- */
+/** 元の日本語を data-ja に退避しておき、切り替えのたびにそこから訳す */
+function i18nWalk(root){
+  const attrs = ['title','data-tip','placeholder'];
+  root.querySelectorAll('*').forEach(el=>{
+    attrs.forEach(a=>{
+      if(!el.hasAttribute(a)) return;
+      const key = 'ja-'+a;
+      if(!el.dataset[key.replace(/-(\w)/g,(m,c)=>c.toUpperCase())]) {
+        el.setAttribute('data-ja-'+a, el.getAttribute(a));
+      }
+      el.setAttribute(a, tr(el.getAttribute('data-ja-'+a)));
+    });
+  });
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
+    acceptNode(n){
+      if(!n.nodeValue || !n.nodeValue.trim()) return NodeFilter.FILTER_REJECT;
+      const p = n.parentElement;
+      if(!p || p.closest('script,style,textarea,code,kbd')) return NodeFilter.FILTER_REJECT;
+      return NodeFilter.FILTER_ACCEPT;
+    }
+  });
+  const nodes = [];
+  while(walker.nextNode()) nodes.push(walker.currentNode);
+  nodes.forEach(n=>{
+    if(n.__ja===undefined) n.__ja = n.nodeValue;
+    n.nodeValue = tr(n.__ja);
+  });
+}
+function applyLang(){
+  document.documentElement.lang = LANG;
+  const b = document.getElementById('btn-lang');
+  if(b) b.textContent = LANG==='ja'? '🌐 EN' : '🌐 日本語';
+  applyHelpLang();
+  i18nWalk(document.body);
+}
+document.getElementById('btn-lang').onclick = ()=>{
+  setLang(getLang()==='ja'? 'en' : 'ja');
+  try{ localStorage.setItem('roba_lang', getLang()); }catch(e){}
+  renderAll();
+  applyLang();
+};
+try{ setLang(localStorage.getItem('roba_lang')||'ja'); }catch(e){}
+
 /* ----- init ----- */
 function registerJisMorphs(){
   if(!state || !state.behaviors) return;
@@ -4627,6 +5732,7 @@ function showHelpPane(paneId, anchorId){
 document.querySelectorAll('#help-bg .htab').forEach(t=>{ t.onclick = ()=>showHelpPane(t.dataset.pane); });
 bootstrap();
 renderAll();
+applyLang();
 document.querySelectorAll('.footer-note').forEach(f=>{ f.textContent += ' · v'+APP_VERSION; });
 </script>
 <div class="footer-note">Zero Mess Keymapper — ZMK用キーマップエディタ · 編集内容はブラウザに自動保存</div>
