@@ -53,7 +53,9 @@
 
   ■ レイヤー順序の制約(ZMK仕様): レイヤー0は常に有効で、番号が大きい
     レイヤーが優先される。したがって共有レイヤーは全ての環境より後ろに
-    置く必要がある。findOrderIssues()/findBaseTransIssues() で検査する。
+    置く必要がある。findShadowedRefs()/findBaseTransIssues() で検査する。
+    グループに「共有」という種別は設けず、配列とOSを「設定なし」にしたものが
+    実質的に共通レイヤーとして機能する(変換の対象外になるため)。
 
   ■ 命名規則: ZMK公式機能=英語(Combo/Macro等)、ツール独自概念=日本語。
     利用者向けの概念は「環境」「共有レイヤー」「同期」で統一する。
@@ -106,6 +108,10 @@ button.danger{color:var(--danger)}
 .lsep{color:var(--jis);font-size:12px;font-weight:700;border-left:2px solid var(--jis);padding-left:8px;min-width:72px}
 .lsep.gen{color:var(--warn);border-left-color:var(--warn)}
 .envmeta{font-size:10px;color:var(--dim);margin-left:6px;white-space:nowrap}
+.envchip{font-size:10px;padding:1px 7px;border-radius:9px;border:1px solid var(--bd);
+  color:var(--fg2);background:transparent;cursor:pointer;white-space:nowrap;margin-left:4px;line-height:1.6}
+.envchip:hover{border-color:var(--acc);color:var(--acc)}
+.envchip.unset{border-style:dashed;opacity:.75}
 .envrole{font-size:9px;font-weight:700;padding:1px 6px;border-radius:8px;margin-left:6px;white-space:nowrap}
 .envrole.base{background:var(--selbg);color:var(--accent)}
 .envrole.shared{background:var(--warnbg);color:var(--warn)}
@@ -122,7 +128,6 @@ input.gcolor::-moz-color-swatch{border:none;border-radius:50%}
 button.shifton{border-color:var(--warn);color:var(--warn)}
 #btn-lnum{min-width:182px}
 #btn-combo-ov{min-width:156px}
-#btn-jis{min-width:172px}
 #btn-shiftlayer{min-width:152px}
 .kbtn.current{border-color:var(--accent);color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
 .catlabel-toggle{cursor:pointer;user-select:none;display:flex;align-items:center;gap:3px}
@@ -316,7 +321,7 @@ label.chk{display:flex;gap:5px;align-items:center;font-size:12.5px;color:var(--t
 <div id="toolbar2"><div id="toolwrap">
   <div class="trow"><span class="tlabel" title="選択中のレイヤーに対する設定">レイヤー</span>
     <button id="btn-shiftlayer" title="このレイヤーでShiftを押しながらの文字入力(記号打ち)を使うかどうか。「有効」のレイヤーだけJIS変換でmod-morphを生成し、キー右上にShift面の記号を表示します。ショートカットの修飾同時押しには影響しません">⇧ Shift入力: 無効</button>
-    <button id="btn-jis" class="jis" title="選択中のレイヤー側を元に、反対側(US⇄JIS)へ変換します。差異のあるキーを一覧で確認してから実行できます">⇄ US→JIS変換</button>
+    <button id="btn-switcher" title="実機で環境を切り替えるキーを配置します。Bluetoothプロファイルの切替も任意で併用できます">⇥ 切り替えキーを配置</button>
     <button id="btn-platform" title="ベースにした環境の配置を、別の環境(キーボード配列 × OS)向けに変換して同期します">⇆ 環境間の同期</button>
   </div>
   <div class="trow"><span class="tlabel" title="マッピングツール上の表示設定(ファームウェアには影響しません)">表示切り替え</span>
@@ -388,6 +393,7 @@ label.chk{display:flex;gap:5px;align-items:center;font-size:12.5px;color:var(--t
   <div class="modal" style="width:min(880px,96vw)">
     <button class="close" onclick="closeModal('combo-bg')">✕ 閉じる</button>
     <h2>Combo<span class="qh" data-tip="複数のキーをほぼ同時に押したときに、別の動作を発動させるZMKの機能です。例: 中段の2キー同時押しでEsc。よく使うキーを増やさずに機能を足せます。">?</span></h2>
+    <div id="combo-envwarn"></div>
     <div id="combo-list"></div>
     <div class="subh" id="combo-form-title">新規コンボ</div>
     <div class="mrow">
@@ -416,6 +422,7 @@ label.chk{display:flex;gap:5px;align-items:center;font-size:12.5px;color:var(--t
   <div class="modal" style="width:min(880px,96vw)">
     <button class="close" onclick="closeModal('morph-bg')">✕ 閉じる</button>
     <h2>Mod-Morph<span class="qh" data-tip="1つのキーに2つの動作を持たせる仕組みです。ふだんは「通常」のキーが入力され、Shiftなどの修飾キーを押しながらだと「修飾時」のキーに切り替わります。例: そのまま押すと「,」、Shiftを押しながらだと「!」。">?</span> <small>修飾キーで別の動作になるキー</small></h2>
+    <div id="bm-envwarn"></div>
     <div id="bm-list"></div>
     <div class="formbox">
       <div class="ftitle" id="bm-form-title">新規 mod-morph</div>
@@ -437,6 +444,7 @@ label.chk{display:flex;gap:5px;align-items:center;font-size:12.5px;color:var(--t
   <div class="modal" style="width:min(880px,96vw)">
     <button class="close" onclick="closeModal('td-bg')">✕ 閉じる</button>
     <h2>Tap-Dance<span class="qh" data-tip="短い時間内に連続でタップした回数で動作が変わる仕組みです。例: 1回タップで「A」、2回続けてタップで「B」。tapping-term-ms は連続タップとして数える間隔(ミリ秒)で、長くするほどゆっくりでも連続と判定されますが、1回目の反応は遅くなります。">?</span> <small>タップ回数で動作が変わるキー</small></h2>
+    <div id="td-envwarn"></div>
     <div id="td-list"></div>
     <div class="formbox">
       <div class="ftitle" id="td-form-title">新規 tap-dance</div>
@@ -453,6 +461,7 @@ label.chk{display:flex;gap:5px;align-items:center;font-size:12.5px;color:var(--t
   <div class="modal" style="width:min(880px,96vw)">
     <button class="close" onclick="closeModal('macro-bg')">✕ 閉じる</button>
     <h2>Macro<span class="qh" data-tip="複数のキー操作を順番に自動送信するキーです。例: 定型文の入力、Ctrl+C→Ctrl+Vの連続操作。ステップには「タップ」のほか、修飾キーの「押す/離す」や「待機」を並べられます。">?</span> <small>キー操作の列を1キーで再生</small></h2>
+    <div id="mc-envwarn"></div>
     <div id="mc-list"></div>
     <div class="formbox">
       <div class="ftitle" id="mc-form-title">新規 マクロ</div>
@@ -600,21 +609,6 @@ label.chk{display:flex;gap:5px;align-items:center;font-size:12.5px;color:var(--t
   </div>
 </div>
 
-<!-- conversion modal -->
-<div class="modal-bg" id="conv-bg">
-  <div class="modal" style="width:min(840px,96vw)">
-    <button class="close" onclick="closeModal('conv-bg')">✕ 閉じる</button>
-    <h2 id="conv-title">変換の確認</h2>
-    <div class="hint" id="conv-sub" style="margin:0 0 6px"></div>
-    <div id="conv-list" style="max-height:55vh;overflow:auto;margin:8px 0"></div>
-    <div class="mrow">
-      <button class="primary" id="conv-exec">変換を実行</button>
-      <button id="conv-cancel">キャンセル</button>
-      <span class="hint" style="margin:0">チェックしたキーのみ変換します。&lt;/&mo等のレイヤー参照番号は常に変換先に合わせて調整されます。</span>
-    </div>
-  </div>
-</div>
-
 <!-- github modal -->
 <div class="modal-bg" id="gh-bg">
   <div class="modal" style="width:min(880px,96vw)">
@@ -623,7 +617,7 @@ label.chk{display:flex;gap:5px;align-items:center;font-size:12.5px;color:var(--t
 
     <div class="subh" style="border:none;padding-top:0;margin-top:4px">接続設定</div>
     <div class="mrow">
-      <label>リポジトリ:</label><input type="text" id="gh-repo" placeholder="ikoooGit/zmk-config-roBa" style="max-width:280px">
+      <label>リポジトリ:</label><input type="text" id="gh-repo" placeholder="owner/zmk-config" style="max-width:280px">
       <label>ブランチ:</label><input type="text" id="gh-branch" class="num" style="max-width:110px" placeholder="main">
     </div>
     <div class="mrow">
@@ -705,17 +699,92 @@ label.chk{display:flex;gap:5px;align-items:center;font-size:12.5px;color:var(--t
   </div>
 </div>
 
+<!-- environment settings modal -->
+<div class="modal-bg" id="envset-bg">
+  <div class="modal" style="width:min(560px,96vw)">
+    <button class="close" onclick="closeModal('envset-bg')">✕ 閉じる</button>
+    <h2>環境の設定<span class="qh" data-tip="この環境で使うOS側のキーボード配列と、OSそのものです。どちらも「設定なし」にすると変換の対象外になり、どの環境からも呼び出す共通の層として使えます。">?</span> <small id="es-name">-</small></h2>
+    <div class="mrow">
+      <label>キーボード配列:</label><select id="es-loc"></select>
+      <label>OS:</label><select id="es-os"></select>
+    </div>
+    <div class="hint" id="es-note" style="margin:0 0 8px"></div>
+    <div class="mrow">
+      <button class="primary" id="es-save">保存</button>
+      <button onclick="closeModal('envset-bg')">キャンセル</button>
+      <span class="hint" style="margin:0">配置は変わりません。他の環境に反映するには「⇆ 環境間の同期」を使ってください</span>
+    </div>
+  </div>
+</div>
+
+<!-- add environment modal -->
+<div class="modal-bg" id="addenv-bg">
+  <div class="modal" style="width:min(680px,96vw)">
+    <button class="close" onclick="closeModal('addenv-bg')">✕ 閉じる</button>
+    <h2>環境を追加<span class="qh" data-tip="別のキーボード配列やOS向けのレイヤー一式を作ります。コピー元を指定すると、その配置を変換したものが最初から入った状態で作られます。">?</span> <small>別の機種で同じ操作感にする</small></h2>
+    <div class="mrow">
+      <label>名前:</label><input type="text" id="ae-name" style="max-width:160px" placeholder="MAC">
+      <span class="hint" style="margin:0">半角英字。例: MAC / IPAD / WIN</span>
+    </div>
+    <div class="mrow">
+      <label>キーボード配列:</label><select id="ae-loc"></select>
+      <label>OS:</label><select id="ae-os"></select>
+      <span class="qh" data-tip="この環境で使うOS側のキーボード設定と、OSそのものです。どちらも「設定なし」にすると変換の対象外になり、どの環境からも呼び出す共通の層として使えます。">?</span>
+    </div>
+    <div class="formbox">
+      <div class="mrow" style="margin-bottom:4px">
+        <label class="chk"><input type="checkbox" id="ae-copy" checked>既存の環境から配置をコピーして変換する</label>
+      </div>
+      <div class="mrow" id="ae-copyrow">
+        <label>コピー元:</label><select id="ae-src"></select>
+        <span class="hint" style="margin:0">同じ数のレイヤーが作られ、配列とOSの違いに合わせて変換されます</span>
+      </div>
+    </div>
+    <div class="mrow">
+      <button class="primary" id="ae-create">作成</button>
+      <button id="ae-cancel">キャンセル</button>
+      <span class="hint" id="ae-msg" style="margin:0"></span>
+    </div>
+  </div>
+</div>
+
+<!-- environment switcher modal -->
+<div class="modal-bg" id="sw-bg">
+  <div class="modal" style="width:min(880px,96vw)">
+    <button class="close" onclick="closeModal('sw-bg')">✕ 閉じる</button>
+    <h2>環境切り替えキーの配置<span class="qh" data-tip="実機で環境を切り替えるためのキーを盤面に置きます。ZMKの &to は「そのレイヤーに移動して、他のレイヤーを解除する」動作なので、環境の切り替えに使えます。">?</span> <small>実機で使う環境を切り替える</small></h2>
+    <div class="mrow">
+      <label>配置先レイヤー:</label><select id="sw-layer"></select>
+      <span class="hint" style="margin:0">どの環境からも押せるレイヤーを選んでください</span>
+    </div>
+    <div class="mrow">
+      <label class="chk"><input type="checkbox" id="sw-bt">Bluetoothプロファイルも一緒に切り替える</label>
+      <span class="qh" data-tip="環境ごとに接続先の機器が違う場合に便利です。有線だけで使う場合や、同じ機器で環境を使い分ける場合はオフのままにしてください（レイヤーの切り替えだけを行います）。">?</span>
+    </div>
+    <div id="sw-assign"></div>
+    <div class="catlabel">キーの位置（クリックで選択）</div>
+    <div style="display:flex;justify-content:center;padding:4px 0"><div id="sw-board" style="position:relative"></div></div>
+    <div class="mrow">
+      <button class="primary" id="sw-apply">配置する</button>
+      <button id="sw-cancel">キャンセル</button>
+      <span class="hint" id="sw-msg" style="margin:0"></span>
+    </div>
+    <div class="hint">電源を入れ直すと最初の環境に戻ります。よく使う環境を一番上に置いておくと扱いやすくなります。</div>
+  </div>
+</div>
+
 <!-- layer order modal -->
 <div class="modal-bg" id="order-bg">
   <div class="modal" style="width:min(820px,96vw)">
     <button class="close" onclick="closeModal('order-bg')">✕ 閉じる</button>
     <h2>レイヤー順序の点検<span class="qh" data-tip="ZMKでは「レイヤー0は常に有効」「番号が大きいレイヤーが優先」というルールがあります。これに反する並びだと、環境を切り替えたときに共有レイヤーが効かなくなります。">?</span> <small>環境を切り替えても正しく動くか</small></h2>
     <div class="htxt" style="margin-bottom:10px">
-ZMKでは<b>レイヤー0が常に有効</b>で、押されたキーは<b>有効なレイヤーのうち最も番号が大きいもの</b>が使われます。この性質のため、レイヤーの並び順によっては環境を切り替えたときに不具合が起きます。
+ZMKでは<b>レイヤー0が常に有効</b>で、押されたキーは<b>有効なレイヤーのうち最も番号が大きいもの</b>が使われます。<br><br>
+そのため、あるレイヤーから<b>自分より前（番号が小さい）レイヤーを呼び出しても無視されます</b>。複数の環境を切り替えて使う場合、どの環境からも呼び出したいレイヤー（マウスやBluetoothなど）は、<b>すべての環境より後ろ</b>に置いてください。
     </div>
     <div id="order-list"></div>
     <div class="mrow" id="order-actions" style="display:none">
-      <button class="primary" id="order-fix">共有レイヤーを最後に移動</button>
+      <button class="primary" id="order-fix">呼び出される側を後ろに移動</button>
       <span class="hint" style="margin:0">レイヤー番号と参照は自動で調整されます</span>
     </div>
   </div>
@@ -756,7 +825,7 @@ ZMKでは<b>レイヤー0が常に有効</b>で、押されたキーは<b>有効
     </div>
     <div class="mrow">
       <button id="plat-scan" class="primary">差分を確認</button>
-      <span class="hint" style="margin:0">「合わせる環境」の中身が置き換わります。新しい環境なら先に「＋ グループ」で作っておいてください</span>
+      <span class="hint" style="margin:0">「合わせる環境」の中身が置き換わります。<br>レイヤー切替（&amp;mo / &amp;lt）は同期先の対応するレイヤーへ自動で付け替わります。環境切り替え（&amp;to）はそのまま残ります</span>
     </div>
     <div id="plat-list" style="max-height:48vh;overflow:auto;margin:8px 0"></div>
     <div class="mrow" id="plat-actions" style="display:none">
@@ -823,7 +892,9 @@ ZMKファームウェア用のキーマップエディタです。ブラウザ�
 このツールでは、<b>使う場面のことを「環境」</b>と呼びます。環境は <b>キーボード配列（OSの設定）× OS</b> の組み合わせです。<br><br>
 例: 「会社PC = JIS × Windows」「自宅Mac = US × macOS」「iPad = US × iOS」<br><br>
 環境ごとにレイヤーのまとまりを作り、<b>ひとつをベースとして設計</b>し、残りは<b>「⇆ 環境間の同期」で自動生成</b>します。実機では、共有レイヤーに置いた切り替えキー（<kbd>&to</kbd>）で環境を切り替えます。こうすると、<b>どの機種でも指の動きを変えずに済みます</b>。<br><br>
-マウスやBluetoothのように環境に依存しない層は<b>「共有」</b>としてまとめ、<b>すべての環境より後ろ</b>に置きます（理由は「このツールの機能 → レイヤー順序の点検」を参照）。
+<b>環境が1つだけなら、これらの機能は表示されません。</b>ふつうのキーマップエディタとして使えます。<br><br>
+各環境は<b>レイヤー一式をそれぞれ持つ</b>のが基本です。マウスやBluetoothの層も環境ごとに複製されますが、同期は<b>キー単位で差分を見る</b>ため、Bluetoothキーのように環境で変わらないものは自動的にそのまま保たれます。テンキー層にBluetoothキーを混ぜても問題ありません。<br><br>
+レイヤー数を節約したい場合は、配列とOSを<b>どちらも「設定なし」</b>にした環境を作ると変換の対象外になるので、どの環境からも呼び出す共通の層として使えます。その場合は<b>すべての環境より後ろに置いてください</b>（理由は「このツールの機能 → レイヤー順序の点検」を参照）。
       </div>
       <div class="subh">できること</div>
       <div class="htxt">
@@ -970,14 +1041,24 @@ ZMKは自作キーボード向けのオープンソースファームウェア�
       <div class="subh" style="border:none;padding-top:0;margin-top:0">US⇄JIS変換</div>
       <div class="htxt">
 OSのキーボード設定が「日本語(JIS)」のPCでは、US配列想定のキーマップだと記号の位置がズレます(例: <kbd>@</kbd> のつもりが <kbd>"</kbd>)。この機能は、USグループの配置を<b>JIS認識のOSでも見た目どおりの記号が入力されるキーコードへ変換</b>し、JISグループへコピーします。<br><br>
-Shiftの有無で記号が変わるキー(<kbd>'</kbd> と <kbd>"</kbd> など)は、mod-morph(jis_*)を自動生成して対応します。変換ボタンは差異があるときだけ有効になり(件数表示)、実行前に対象キーの一覧で確認・選択できます。逆方向(JIS→US)も可能です。US/JISの切り替えは <kbd>&to</kbd> をキーに割り当ててください(実番号は「№」で確認できます)。
+Shiftの有無で記号が変わるキー(<kbd>'</kbd> と <kbd>"</kbd> など)は、mod-morph(jis_*)を自動生成して対応します。この変換は「＋ 環境」または「⇆ 環境間の同期」から行います。環境に <b>US</b> と <b>JIS</b> の配列を設定しておけば、どちらの向きにも変換できます。実行前に対象キーの一覧で確認・選択でき、実機での切り替えキーは「⇥ 切り替えキーを配置」で用意できます。
       </div>
       <dl class="hdl">
-        <dt>レイヤー順序の点検</dt><dd>ZMKには「<b>レイヤー0は常に有効</b>」「<b>番号が大きいレイヤーが優先</b>」というルールがあります。そのため<b>共有レイヤー（マウス・Bluetoothなど）は、どの環境のレイヤーよりも後ろ（大きい番号）に置く必要があります</b>。前にあると、環境を切り替えたときに共有レイヤーを呼んでも反応しません。<br><br>「⇅ レイヤー順序を点検」で検出し、ワンクリックで並べ替えられます（レイヤー番号と参照は自動調整）。あわせて、環境の最初のレイヤーにある透過（▽）も検出します。透過の位置ではレイヤー0＝最初の環境の割り当てが出てしまうためです。<span class="dim">役立つ場面: 環境を切り替えたらマウス操作が効かなくなった、という不具合の原因がこれです。</span></dd>
+        <dt>環境切り替えキーの配置</dt><dd>実機で環境を切り替えるキーを、盤面から位置を選んで配置します。ZMKの <kbd>&to</kbd>（そのレイヤーへ移動し、他を解除する）を使います。<br><br>
+<b>Bluetoothプロファイルの切り替えを併用</b>するかは任意です。環境ごとに接続先の機器が違うならオンに、<b>有線だけで使う場合や同じ機器で環境を使い分ける場合はオフのまま</b>にしてください（レイヤーの切り替えだけを行います）。<br><br>
+配置先のレイヤーはどこでも構いません。どの環境からも押せる場所を選んでください。<span class="dim">補足: 電源を入れ直すと最初の環境（レイヤー0）に戻ります。いちばん使う環境を先頭に置いておくと扱いやすくなります。</span></dd>
+        <dt>レイヤー順序の点検</dt><dd>ZMKには「<b>レイヤー0は常に有効</b>」「<b>番号が大きいレイヤーが優先</b>」というルールがあります。そのため、あるレイヤーから<b>自分より前（番号が小さい）レイヤーを呼び出しても無視されます</b>。<br><br>「⇅ レイヤー順序を点検」は、実際にそうなっている呼び出しを見つけて表示し、ワンクリックで並べ替えられます（レイヤー番号と参照は自動調整）。あわせて、環境の最初のレイヤーにある透過（▽）も検出します。透過の位置ではレイヤー0＝最初の環境の割り当てが出てしまうためです。<span class="dim">役立つ場面: 環境を切り替えたらマウス操作が効かなくなった、という不具合の原因がこれです。どの環境からも呼び出したいレイヤーは、すべての環境より後ろに置いてください。</span></dd>
         <dt>グループ間変換（配列規格 / OS）</dt><dd>グループごとに<b>配列規格</b>（US・JIS・UK・ドイツ語・Dvorak）と<b>対象OS</b>（Windows・macOS・Linux）を指定でき、あるグループの配置をもう一方に合わせて作り直せます。配列とOSの両方が違う場合は同時に変換します。US⇄JIS変換もこの仕組みの一部です。<span class="dim">役立つ場面: 3種類以上の環境を1つのキーボードで使い分けるとき、それぞれのグループを1回の操作で揃えられます。</span></dd>
         <dt>Win⇄Mac変換</dt><dd>WindowsとmacOSでは、同じ操作でも押すキーが異なります（コピーは <kbd>Ctrl+C</kbd> と <kbd>Cmd+C</kbd>、行頭移動は <kbd>Home</kbd> と <kbd>Cmd+←</kbd> など）。変換元のグループを元に、もう一方のOS向けの配置をまとめて作れます。日本語入力の切替（変換/無変換 ⇄ かな/英数）にも対応します。<span class="dim">役立つ場面: 会社ではWindows、自宅ではMacというように機種をまたぐとき、指の動きを変えずに済みます。US⇄JIS変換と同じく、実行前に差分を一覧で確認できます。</span></dd>
         <dt id="help-shift">Shift入力トグル</dt><dd>そのレイヤーで、Shiftを押しながらの記号打ちを使うかを指定します。「有効」のレイヤーだけJIS変換でmod-morphを生成し、キー右上にShift面を表示します。ショートカットの修飾同時押しには影響しません。<span class="dim">役立つ場面: ファンクション・マウス・Bluetooth用など記号打ちをしないレイヤーを「無効」にしておくと、不要なmod-morphが作られず、キーマップも表示もシンプルに保てます。</span></dd>
-        <dt>環境と共有レイヤー</dt><dd>レイヤーは<b>環境</b>（キーボード配列 × OS）ごとにまとめて管理します。マウスやBluetoothのように環境に依存しない層は<b>共有</b>とし、<b>すべての環境より後ろ</b>に置きます。書き出し時はグループ番号を含む名前で保存されるため、グループが違えば同じレイヤー名を使えます。グループ名の左のラベルには色が付き、ラベル横の●からいつでも変更できます(初期値: US=青、JIS=シアン、GENERAL=アンバー)。<span class="dim">役立つ場面: US側とJIS側で対応するレイヤーに同じ名前を付けられるので、対応関係がひと目で分かります。</span></dd>
+        <dt>マクロ・tap-dance と環境</dt><dd>コンボと同じことが、マクロ・tap-dance・自作のmod-morphにも起こります。定義は1つなのに複数の環境のレイヤーから呼ばれるため、記号を出す定義は配列の違う環境で別の記号になります。各画面を開くと検出して知らせるので、<b>「環境ごとに分ける」</b>を押してください。定義が複製され、<b>その環境のレイヤーの参照先も自動で差し替わります</b>。<span class="dim">変換で自動生成された mod-morph は、はじめから環境専用なので対象外です。</span></dd>
+        <dt>コンボと環境</dt><dd>ZMKのコンボは<b>全レイヤーで動きます</b>。そのため <kbd>"</kbd> のような記号を出すコンボは、配列の違う環境では別の記号が出てしまいます。「Combo」画面を開くと該当するコンボを検出して知らせるので、<b>「環境ごとに分ける」</b>を押してください。コンボが環境の数だけ複製され、それぞれに <code>layers</code> 指定と変換後の動作が入ります。<span class="dim">Bluetoothやマウスなど、環境で変わらない動作のコンボは検出されません。</span></dd>
+        <dt>環境の設定を変える</dt><dd>レイヤー一覧の各環境の右にある<b>設定チップ</b>（例: <span class="dim">JIS × Windows</span>）をクリックすると、キーボード配列とOSをその場で変更できます。設定を変えても<b>配置はそのまま</b>です。実際に変換するときは「⇆ 環境間の同期」を使ってください。</dd>
+        <dt>環境の追加</dt><dd>「＋ 環境」を押すと、名前・キーボード配列・OS・コピー元を1つの画面で指定できます。コピー元を選んでおけば、<b>その配置を変換したものが入った状態</b>で作られるので、あとから同期する必要はありません。<span class="dim">以前は「グループを作る → レイヤーを増やす → 同期する」の3段階でしたが、1回で済むようになりました。</span></dd>
+        <dt>環境と「設定なし」</dt><dd>レイヤーは<b>環境</b>（キーボード配列 × OS）ごとにまとめて管理します。各環境は<b>レイヤー一式をそれぞれ持つ</b>のが基本です。<br><br>
+配列とOSを<b>どちらも「設定なし」</b>にした環境は変換の対象外になります。これを利用すると、どの環境からも呼び出す共通のレイヤーとして使えます（その場合はすべての環境より後ろに置いてください）。ツール側で「共有レイヤー」という特別な種別は設けていません。<br><br>
+実のところ、完全に環境非依存なキーは <kbd>&bt</kbd>（Bluetooth切替）や <kbd>&rgb_ug</kbd> のような<b>キーボード内部で完結するもの</b>だけです。マウスのスクロールはmacOSの「ナチュラルスクロール」で向きが変わり、<kbd>KP_EQUAL</kbd> はWindowsで反応せず、<kbd>F13</kbd>以降はAndroidが非対応です。つまり「この層は環境非依存」と層単位で決めつけるのは無理があります。<br><br>
+そこで本ツールは<b>キー単位で差分を見て同期</b>します。テンキー層にBluetoothキーを混ぜても、Bluetoothキーはそのまま保たれ、環境で変わるキーだけが変換されます。書き出し時はグループ番号を含む名前で保存されるため、グループが違えば同じレイヤー名を使えます。グループ名の左のラベルには色が付き、ラベル横の●からいつでも変更できます(初期値: US=青、JIS=シアン、GENERAL=アンバー)。<span class="dim">役立つ場面: US側とJIS側で対応するレイヤーに同じ名前を付けられるので、対応関係がひと目で分かります。</span></dd>
         <dt>OS互換チェック</dt><dd>キーコードには、特定のOSだけが解釈しないものがあります。たとえばメディアキーは見た目が同じでも中身が2種類あり(<kbd>K_MUTE</kbd> と <kbd>C_MUTE</kbd>)、前者はWindowsとmacOSが解釈しないため<b>押しても何も起きません</b>。逆に <kbd>C_STOP</kbd> のようにWindowsだけ非対応のキーもあります。<br><br>「☰ メニュー → OS互換チェック」で<b>使用するOSを選ぶ</b>と、そのOSで反応しないキーを一覧表示し、代替キーへ一括置換できます。<span class="dim">補足: Linuxは最も対応範囲が広く、メディアキーはどちらの種類でも動作します。ただし <kbd>SYSREQ</kbd> や <kbd>LOCKING_CAPS</kbd> のような旧式のキー、<kbd>INT7</kbd>〜<kbd>INT9</kbd>・<kbd>LANG6</kbd>〜<kbd>LANG9</kbd> は非対応です。判定はZMK公式のキーコード一覧に基づいています。</span></dd>
         <dt>整合性チェック</dt><dd>書き出し・プレビュー時に、存在しないレイヤーへの参照や未定義ビヘイビアなどを自動で検査し、問題があれば一覧表示します。<span class="dim">役立つ場面: ビルドしてから気付くミスを、書き出す前に発見できます。</span></dd>
         <dt>バックアップ / 復元</dt><dd>全設定をJSONファイル1つで保存・完全復元できます。<span class="dim">役立つ場面: ブラウザのデータ削除や別PCへの移行、配列の試行錯誤前の保険に。</span></dd>
@@ -997,7 +1078,7 @@ Shiftの有無で記号が変わるキー(<kbd>'</kbd> と <kbd>"</kbd> など)�
  * 文字テーブル(LOCALE_CHARS) / .keymapパース / 生成 / 各機能ノードの
  * パース&パッチ / グループ・変換ユーティリティ / 表示ラベル
  * ============================================================ */
-const APP_VERSION = '2.5.0';
+const APP_VERSION = '3.7.0';
 
 let NUM_KEYS = 43;
 // roBa physical layout: [w,h,x,y,rot(centi-deg*100),rx,ry]
@@ -1026,7 +1107,7 @@ const I18N_EN = {
 'リセット':'Reset',
 'レイヤー':'Layer','表示切り替え':'View','ビヘイビア設定':'Behaviors',
 '⇧ Shift入力: 無効':'⇧ Shift input: Off','⇧ Shift入力: 有効':'⇧ Shift input: On',
-'⇄ US→JIS変換':'⇄ US→JIS','⇄ JIS→US変換':'⇄ JIS→US','⌘ Win⇄Mac変換':'⌘ Win⇄Mac','⇆ 環境間の同期':'⇆ Sync environments','環境間の同期':'Environment sync','同じ操作感で別の環境を作る':'Recreate the same feel elsewhere','同じ操作感を別の環境で再現する':'Recreate the same feel in another environment','基準にする環境:':'Base environment:','合わせる環境:':'Target environment:','基準の環境:':'Base:','キーボード配列:':'Keyboard layout:','同期する':'Sync','＋ 環境を追加':'+ Add environment','＋ 環境':'+ Environment','共有':'Shared','ベース':'Base','環境':'Environment','⇅ レイヤー順序を点検':'⇅ Check layer order','レイヤー順序の点検':'Layer order check','環境を切り替えても正しく動くか':'Will it still work after switching','共有レイヤーを最後に移動':'Move shared layers to the end','レイヤー番号と参照は自動で調整されます':'Layer numbers and references are adjusted automatically','要修正':'Fix needed','注意':'Note','グループ間の変換':'Group conversion','配列規格とOSの違いを吸収する':'Bridge layout and OS differences','変換元の設定:':'Source settings:','変換先の設定:':'Target settings:','配列:':'Layout:','OS:':'OS:','指定しない':'Not specified',
+'⌘ Win⇄Mac変換':'⌘ Win⇄Mac','⇆ 環境間の同期':'⇆ Sync environments','環境間の同期':'Environment sync','同じ操作感で別の環境を作る':'Recreate the same feel elsewhere','同じ操作感を別の環境で再現する':'Recreate the same feel in another environment','基準にする環境:':'Base environment:','合わせる環境:':'Target environment:','基準の環境:':'Base:','キーボード配列:':'Keyboard layout:','同期する':'Sync','＋ 環境を追加':'+ Add environment','＋ 環境':'+ Environment','ベース':'Base','環境':'Environment','⇅ レイヤー順序を点検':'⇅ Check layer order','⇥ 切り替えキーを配置':'⇥ Place switch keys','環境を追加':'Add environment','環境の設定':'Environment settings','配列 / OS を設定':'Set layout / OS','保存':'Save','環境ごとに分ける':'Split per environment','別の機種で同じ操作感にする':'Same feel on another machine','既存の環境から配置をコピーして変換する':'Copy and convert an existing environment','コピー元:':'Copy from:','作成':'Create','半角英字。例: MAC / IPAD / WIN':'Latin letters only. e.g. MAC / IPAD / WIN','同じ数のレイヤーが作られ、配列とOSの違いに合わせて変換されます':'The same number of layers is created and converted for the new layout and OS','設定なし':'Not set','配列なし':'No layout','呼び出される側を後ろに移動':'Move the called layers to the end','環境切り替えキーの配置':'Place environment switch keys','実機で使う環境を切り替える':'Switch environments on the keyboard','配置先レイヤー:':'Place on layer:','Bluetoothプロファイルも一緒に切り替える':'Also switch the Bluetooth profile','キーの位置（クリックで選択）':'Key position (click to choose)','配置する':'Place','位置を指定':'Choose position','キー位置を選んでください':'Choose a key position','レイヤー順序の点検':'Layer order check','環境を切り替えても正しく動くか':'Will it still work after switching','レイヤー番号と参照は自動で調整されます':'Layer numbers and references are adjusted automatically','要修正':'Fix needed','注意':'Note','グループ間の変換':'Group conversion','配列規格とOSの違いを吸収する':'Bridge layout and OS differences','変換元の設定:':'Source settings:','変換先の設定:':'Target settings:','配列:':'Layout:','OS:':'OS:','指定しない':'Not specified',
 '⊞ Combo表示: OFF':'⊞ Show combos: Off','⊞ Combo表示: ON':'⊞ Show combos: On',
 '№ fw番号で表示':'№ Show firmware no.','№ グループ番号で表示':'№ Show group no.',
 '◐ テーマ: 自動':'◐ Theme: Auto','○ テーマ: ライト':'○ Theme: Light','● テーマ: ダーク':'● Theme: Dark',
@@ -1140,13 +1221,14 @@ const PLATFORM_PAIRS = [
   ['&kp LC(BSPC)',        '&kp LA(BSPC)',        '単語単位で削除'],
   ['&kp LC(DEL)',         '&kp LA(DEL)',         '単語単位で前方削除'],
   ['&kp LA(TAB)',         '&kp LG(TAB)',         'アプリの切り替え'],
-  ['&kp LA(F4)',          '&kp LG(Q)',           'アプリの終了'],
-  ['&kp LS(LG(S))',       '&kp LG(LS(N4))',      '範囲スクリーンショット'],
-  ['&kp PSCRN',           '&kp LG(LS(N3))',      '画面全体のスクリーンショット'],
-  ['&kp INT_HENKAN',      '&kp LANG1',           'かな入力へ'],
-  ['&kp INT_MUHENKAN',    '&kp LANG2',           '英数入力へ'],
+  ['&kp LA(F4)',          '&kp LG(Q)',           'アプリの終了',                ['mac']],
+  ['&kp LS(LG(S))',       '&kp LG(LS(N4))',      '範囲スクリーンショット',        ['mac']],
+  ['&kp PSCRN',           '&kp LG(LS(N3))',      '画面全体のスクリーンショット',    ['mac']],
+  // 日本語入力の切替キーはWin⇄Macで置き換えない。
+  // LANG1 / LANG2 は Windows でも macOS でも動作し、変換 / 無変換(INT4 / INT5)は
+  // Windows では動作しないため、置き換えるとかえって動かなくなる。
+  // 動かない組み合わせは OS互換チェック(OS_COMPAT)で個別に知らせる。
   ['&kp LCTRL',           '&kp LGUI',            '主修飾キー(Ctrl / Cmd)'],
-  ['&kp LEFT_CONTROL',    '&kp LEFT_GUI',        '主修飾キー(Ctrl / Cmd)'],
   ['&kp RCTRL',           '&kp RGUI',            '主修飾キー(右)'],
   ['&mt LCTRL',           '&mt LGUI',            '主修飾キー(ホールド)']
 ];
@@ -1155,15 +1237,35 @@ function swapMainMod(raw, toMac){
   const from = toMac? 'LC' : 'LG', to = toMac? 'LG' : 'LC';
   return raw.replace(new RegExp('\\b'+from+'\\(([A-Z0-9_]+)\\)','g'), (m,inner)=>to+'('+inner+')');
 }
+/* ショートカットの体系は実質2系統。ここを基準に変換方向を決める。
+ * Ctrl系: Windows / Linux / Android   Cmd系: macOS / iPadOS(iOS) */
+const OS_FAMILY = {win:'ctrl', linux:'ctrl', android:'ctrl', mac:'cmd', ios:'cmd'};
+/** 2つのOSの間で必要な変換方向。同じ系統なら null(変換不要) */
+function platformDir(srcOs, dstOs){
+  const a = OS_FAMILY[srcOs], b = OS_FAMILY[dstOs];
+  if(!a || !b || a===b) return null;
+  return a==='ctrl'? 'win2mac' : 'mac2win';
+}
+function osName(id){ const o = OS_LIST.find(x=>x.id===id); return o? o.name : (id||''); }
+/** バインディング内のキーコードを正規表記に揃える(比較用)。
+ * ZMKは同じキーに複数の別名がある(LANGUAGE_1 と LANG1、LEFT_WIN と LGUI など)。
+ * 表記の違いで変換を取りこぼさないよう、照合の前にここを通す。
+ * LC( のような修飾ラッパは括弧が続くので対象外にする。 */
+function canonBinding(s){
+  return (s||'').trim().replace(/\b([A-Z][A-Z0-9_]*)\b(?!\s*\()/g, m=>canon(m) || m);
+}
 /** 1バインディングをWin⇄Mac変換。dir='win2mac' | 'mac2win' */
 function convBindingPlatform(raw, dir){
   const toMac = dir==='win2mac';
   const src = (raw||'').trim();
-  for(const [win, mac, desc] of PLATFORM_PAIRS){
+  const cs = canonBinding(src);
+  for(const [win, mac, desc, onlyOn] of PLATFORM_PAIRS){
     const a = toMac? win : mac, b = toMac? mac : win;
-    if(src===a) return {raw:b, desc};
+    const ca = canonBinding(a);
+    // onlyOn は「macOS側の操作が通用するOS」。iPadOSなどでは意味を成さないものがある
+    if(cs===ca) return {raw:b, desc, onlyOn};
     // &mt LCTRL X のように後ろにパラメータが続く形
-    if(a.startsWith('&mt ') && src.startsWith(a+' ')) return {raw:b+src.slice(a.length), desc};
+    if(ca.startsWith('&mt ') && cs.startsWith(ca+' ')) return {raw:b+cs.slice(ca.length), desc, onlyOn};
   }
   const swapped = swapMainMod(src, toMac);
   if(swapped!==src) return {raw:swapped, desc:'ショートカットの修飾キー'};
@@ -1184,6 +1286,17 @@ const OS_LIST = [
 ];
 // [win, mac, linux, ios, android]
 const OS_COMPAT = {
+  // --- 日本語/言語入力の切替 ---
+  // 変換 / 無変換 / かな は Windows と Android が解釈しない。
+  // LANG1 / LANG2 なら Windows でも macOS でも動作する。
+  INT_HENKAN:   {s:[0,1,1,-1,0], alt:'LANG1', why:'日本語入力の切替(変換)。WindowsとAndroidでは反応しません'},
+  INT_MUHENKAN: {s:[0,1,1,-1,0], alt:'LANG2', why:'日本語入力の切替(無変換)。WindowsとAndroidでは反応しません'},
+  INT_KANA:     {s:[0,1,1,-1,0], alt:'LANG1', why:'日本語入力の切替(かな)。WindowsとAndroidでは反応しません'},
+  LANG1:        {s:[1,1,1,-1,0],             why:'日本語入力の切替(かな)。Androidでは反応しません'},
+  LANG2:        {s:[1,1,1,-1,0],             why:'日本語入力の切替(英数)。Androidでは反応しません'},
+  LANG3:        {s:[0,1,1,-1,0],             why:'カタカナ。macOSとLinux以外では反応しません'},
+  LANG4:        {s:[0,1,1,-1,0],             why:'ひらがな。macOSとLinux以外では反応しません'},
+  LANG5:        {s:[0,1,1,-1,0],             why:'半角/全角。macOSとLinux以外では反応しません'},
   // --- メディア: キーボードページ版はWindows/macOSが解釈しない ---
   K_MUTE:        {s:[0,1,1,-1,1],  alt:'C_MUTE',        why:'メディアキー(キーボードページ)'},
   K_MUTE2:       {s:[0,0,1,0,1],   alt:'C_MUTE',        why:'メディアキー(キーボードページ)'},
@@ -1288,7 +1401,8 @@ function findOsIssues(raw, targets){
   const oses = targets && targets.length? targets : OS_LIST.map(o=>o.id);
   const out = [];
   keycodesIn(raw).forEach(kc=>{
-    const info = OS_COMPAT[kc];
+    // 別名で書かれていても拾えるように、正規表記でも引く
+    const info = OS_COMPAT[kc] || OS_COMPAT[canon(kc)];
     if(!info) return;
     const bad = oses.filter(o=> info.s[OS_INDEX[o]]===0);
     if(bad.length) out.push({kc, bad, alt:info.alt, why:info.why});
@@ -1423,7 +1537,10 @@ LEFT_SHIFT:'LSHFT', LSHIFT:'LSHFT', RIGHT_SHIFT:'RSHFT', RSHIFT:'RSHFT',
 LEFT_CONTROL:'LCTRL', LEFT_ALT:'LALT', LEFT_GUI:'LGUI', LEFT_WIN:'LGUI', LEFT_COMMAND:'LGUI', LEFT_META:'LGUI',
 RIGHT_CONTROL:'RCTRL', RIGHT_ALT:'RALT', RIGHT_GUI:'RGUI', RIGHT_WIN:'RGUI', RIGHT_COMMAND:'RGUI', RIGHT_META:'RGUI',
 INTERNATIONAL_1:'INT1', INTERNATIONAL_3:'INT3', INT_RO:'INT1', INT_YEN:'INT3',
-INTERNATIONAL_4:'INT4', INTERNATIONAL_5:'INT5', LANGUAGE_1:'LANG1', LANGUAGE_2:'LANG2',
+INTERNATIONAL_4:'INT_HENKAN', INT4:'INT_HENKAN', INTERNATIONAL_5:'INT_MUHENKAN', INT5:'INT_MUHENKAN',
+INTERNATIONAL_2:'INT_KANA', INT2:'INT_KANA',
+LANGUAGE_1:'LANG1', LANGUAGE_2:'LANG2', LANGUAGE_3:'LANG3', LANGUAGE_4:'LANG4', LANGUAGE_5:'LANG5',
+LANG_HANGEUL:'LANG1', LANG_HANJA:'LANG2', LANG_KATAKANA:'LANG3', LANG_HIRAGANA:'LANG4', LANG_ZENKAKUHANKAKU:'LANG5',
 INT_HENKAN:'INT_HENKAN', INT_MUHENKAN:'INT_MUHENKAN', INT_KATAKANAHIRAGANA:'INT_KANA', INT_KANA:'INT_KANA',
 NON_US_HASH:'NUHS', TILDE2:'NUHS', PLUS:'PLUS', EQUAL:'EQUAL', MINUS:'MINUS', GRAVE:'GRAVE', TILDE:'TILDE',
 COLON:'COLON', SEMI:'SEMI', COMMA:'COMMA', DOT:'DOT', FSLH:'FSLH', LBKT:'LBKT', RBKT:'RBKT', BSLH:'BSLH',
@@ -1900,7 +2017,12 @@ function parseMacroSteps(raw){
 function genMacroBindings(steps){
   let mode='tap'; const out=[];
   for(const s of steps){
-    if(s.type==='wait'){ out.push('&macro_wait_time '+s.ms); continue; }
+    if(s.type==='wait'){
+      // 時間が入っていない待機は書き出さない。`undefined` を出すとビルドできない keymap になる
+      const ms = Number(s.ms);
+      if(isFinite(ms) && ms > 0) out.push('&macro_wait_time '+ms);
+      continue;
+    }
     if(s.type!==mode){ out.push('&macro_'+s.type); mode=s.type; }
     out.push(s.binding);
   }
@@ -2193,54 +2315,114 @@ const LOCALE_LIST = [
   {id:'de',   name:'DE (ドイツ語 QWERTZ)'},
   {id:'dvorak', name:'Dvorak'}
 ];
-/* ---------- レイヤー順序の検査 ----------
- * ZMKの仕様: レイヤー0は常に有効。押されたキーは「有効なレイヤーのうち
- * 最も番号が大きいもの」の割り当てが使われる。
- * したがって:
- *  (a) 共有レイヤー(全環境から呼ぶ層)は、どの環境のベース層よりも
- *      大きい番号でなければ、環境切替後に呼び出しても無視される。
- *  (b) 環境のベース層に透過(&trans)があると、レイヤー0(＝最初の環境)の
- *      割り当てがそこだけ漏れて出る。
- * 出典: https://zmk.dev/docs/keymaps
- * 引数の groups は [{name, count, shared?}] 形式。 */
-function isSharedGroup(g){
-  if(!g) return false;
-  if(g.shared!==undefined) return !!g.shared;
-  const n = (g.name||'').toUpperCase();
-  return n==='GEN' || n==='GENERAL' || n==='SHARED' || n==='共有';
+/* ---------- 用語 ----------
+ * 利用者向けの呼び名はここだけを直せば全体に反映される。
+ * (データ構造側は group / shared のまま。表示名だけを差し替える) */
+const TERMS = {
+  env:      '環境',      // レイヤーのまとまり = キーボード配列 × OS
+  envs:     '環境',
+  shared:   '共有レイヤー',
+  base:     'ベース',
+  sync:     '同期'
+};
+function term(k){ return TERMS[k] || k; }
+
+/* ---------- 環境間でのレイヤー参照の付け替え ----------
+ * 環境ごとにレイヤー一式を持つとき、ある環境の中の「自分の記号レイヤーへ」
+ * という参照は、同期先では「同期先の記号レイヤーへ」に置き換える必要がある。
+ * ただし &to は「環境そのものを切り替える」用途とみなし、絶対指定として残す。 */
+const WITHIN_ENV_REFS = ['&mo','&tog','&sl','&lt','&lt_to_layer_0'];
+function remapWithinEnv(raw, offsetMap){
+  const t = (raw||'').trim().split(/\s+/);
+  if(t.length < 2) return raw;
+  const isLayerParam = WITHIN_ENV_REFS.includes(t[0])
+    || (typeof LAYER_PARAM_HTS!=='undefined' && LAYER_PARAM_HTS.has(t[0].slice(1)));
+  if(!isLayerParam) return raw;          // &to はここに入らない = 付け替えない
+  const n = Number(t[1]);
+  if(isNaN(n) || offsetMap[n]===undefined) return raw;
+  t[1] = String(offsetMap[n]);
+  return t.join(' ');
 }
-/** 共有グループより後ろに環境グループがあるか調べる */
-function findOrderIssues(groups){
+/** 環境Aのレイヤー範囲 → 環境Bのレイヤー範囲 の対応表を作る */
+function buildEnvOffsetMap(srcRange, dstRange){
+  const map = {};
+  const n = Math.min(srcRange.count, dstRange.count);
+  for(let k=0;k<n;k++) map[srcRange.start+k] = dstRange.start+k;
+  return map;
+}
+
+/* ---------- レイヤー順序の検査 ----------
+ * ZMKの仕様:
+ *   ・レイヤー0は常に有効
+ *   ・押されたキーは「有効なレイヤーのうち最も番号が大きいもの」が使われる
+ * したがって &to でグループAの先頭レイヤーに移ったあと、そこから &mo T を
+ * 呼び出しても T < A.start なら A が優先され、T は無視される。
+ * ラベル(共有かどうか)ではなく、この条件をそのまま判定する。
+ * 出典: https://zmk.dev/docs/keymaps */
+function layerRefTargets(raw){
+  const t = (raw||'').trim().split(/\s+/);
+  if(t.length < 2) return [];
+  // &to は「そのレイヤーへ移る」動作なので他に隠されることはない
+  const within = ['&mo','&tog','&sl','&lt','&lt_to_layer_0'];
+  const isRef = within.includes(t[0])
+    || (typeof LAYER_PARAM_HTS!=='undefined' && LAYER_PARAM_HTS.has(t[0].slice(1)));
+  if(!isRef) return [];
+  const n = Number(t[1]);
+  return isNaN(n)? [] : [n];
+}
+/** 呼び出しても隠れてしまうレイヤー参照を洗い出す */
+function findShadowedRefs(groups, layers){
   const rs = groupRanges(groups||[]);
-  const issues = [];
-  rs.forEach((r,i)=>{
-    if(!isSharedGroup(groups[i])) return;
-    const after = rs.filter((x,j)=> j>i && !isSharedGroup(groups[j]));
-    if(after.length){
-      issues.push({
-        kind:'shared-before-env',
-        sharedIndex:i,
-        sharedName:r.name,
-        blockedBy: after.map(x=>x.name)
+  const out = [];
+  rs.forEach((r,gi)=>{
+    if(r.start===0) return;                 // 先頭グループは常に有効なので隠れない
+    for(let k=0;k<r.count;k++){
+      const li = r.start+k;
+      const L = layers[li];
+      if(!L) continue;
+      L.bindings.forEach((b,pos)=>{
+        layerRefTargets(b).forEach(target=>{
+          if(target < r.start){
+            out.push({groupIndex:gi, groupName:r.name, layerIndex:li, pos, target, binding:b, blockedBy:r.start});
+          }
+        });
       });
     }
   });
-  return issues;
+  return out;
 }
-/** 共有グループを末尾へ回した並び順を返す。order[newIdx]=oldIdx */
-function orderWithSharedLast(groups){
-  const idx = groups.map((g,i)=>i);
-  const env = idx.filter(i=>!isSharedGroup(groups[i]));
-  const shared = idx.filter(i=>isSharedGroup(groups[i]));
-  return env.concat(shared);
+/** 隠れる参照が解消される並び順を探す。order[newIdx]=oldIdx（見つからなければ null） */
+function orderToFixShadowing(groups, layers){
+  const rs = groupRanges(groups||[]);
+  if(rs.length < 2) return null;
+  // 各グループについて「他のどのグループから呼ばれているか」を数える
+  const calledBy = rs.map(()=>new Set());
+  rs.forEach((r,gi)=>{
+    for(let k=0;k<r.count;k++){
+      const L = layers[r.start+k];
+      if(!L) continue;
+      L.bindings.forEach(b=>{
+        layerRefTargets(b).forEach(target=>{
+          const tg = rs.findIndex(x=>target>=x.start && target<x.start+x.count);
+          if(tg>=0 && tg!==gi) calledBy[tg].add(gi);
+        });
+      });
+    }
+  });
+  // 他グループから呼ばれているグループを後ろへ回す（安定ソート）
+  const idx = rs.map((r,i)=>i);
+  const shared = idx.filter(i=>calledBy[i].size>0);
+  const rest   = idx.filter(i=>calledBy[i].size===0);
+  const order  = rest.concat(shared);
+  return order.every((o,i)=>o===i)? null : order;
 }
-/** 各環境グループのベース層(先頭レイヤー)に透過があるか */
+/** グループの先頭レイヤーにある透過(&trans)を探す。
+ *  レイヤー0は常に有効なので、そこだけ先頭グループの割り当てが漏れる。 */
 function findBaseTransIssues(groups, layers){
   const rs = groupRanges(groups||[]);
   const out = [];
   rs.forEach((r,i)=>{
-    if(isSharedGroup(groups[i])) return;
-    if(r.start===0) return;              // レイヤー0自身は漏れる先がない
+    if(r.start===0) return;
     const L = layers[r.start];
     if(!L) return;
     const positions = [];
@@ -2560,7 +2742,451 @@ const DEFAULT_KEYMAP = `#include <behaviors.dtsi>
 };
 `;
 
-if (typeof module !== 'undefined') module.exports = {parseKeymap, generateKeymap, convBinding, convBindingUs, remapRefsOnly, normBinding, convertLayerToJis, convertAllToJis, groupRanges, gnameFor, buildJisMaps, nodeNameFor, parseHoldtapOne, patchHoldtapOne, parseStickyOne, patchStickyOne, parseMacros, genMacrosInner, parseMacroSteps, genMacroBindings, parseCondLayers, genCondLayersInner, charFor, isSharedGroup, findOrderIssues, orderWithSharedLast, findBaseTransIssues, LOCALE_CHARS, LOCALE_LIST, localeIndex, getLocaleIndex, charOfKeycode, keycodeForChar, convBindingLocale, SYM_TO_LS, parseRepoRef, utf8ToBase64, base64ToUtf8, pickConfigFiles, I18N_EN, tr, setLang, getLang, OS_LIST, OS_COMPAT, OS_INDEX, keycodesIn, findOsIssues, fixOsIssues, PLATFORM_PAIRS, convBindingPlatform, swapMainMod, findWinIncompatible, fixWinIncompatible, KEYBOARD, ROBA_PROFILE, setKeyboard, getKeyboard, parsePhysicalLayout, deriveRows, gridKeys, makeEmptyKeymap, APP_VERSION, canon, kcLabel, JIS_MAP, REV_MAP, US_TO_JIS_ORDER, tokenizeBindings, DEFAULT_KEYMAP, NUM_KEYS, bindingLabel, JIS_MORPHS, parseCombos, parseBehaviors, parseTrackball, patchTrackball, genConf, CONF_DEFAULTS, PHYS};
+/** 1バインディングを 配列+OS+レイヤー参照 について変換 */
+function convBindingFull(raw, srcLoc, dstLoc, srcOs, dstOs, shiftMode, morphSink, offsetMap){
+  let cur = raw, warns = [], descs = [];
+  if(offsetMap){
+    const r0 = remapWithinEnv(cur, offsetMap);
+    if(r0!==cur){ cur = r0; descs.push('レイヤー参照'); }
+  }
+  if(srcLoc && dstLoc && srcLoc!==dstLoc){
+    const r = convBindingLocale(cur, srcLoc, dstLoc, shiftMode, morphSink);
+    if(r.raw!==cur) descs.push('配列');
+    cur = r.raw; warns = warns.concat(r.warns);
+  }
+  const dir = platformDir(srcOs, dstOs);
+  if(dir){
+    const r = convBindingPlatform(cur, dir);
+    if(r.raw!==cur){
+      cur = r.raw;
+      descs.push(r.desc||'OS');
+      if(dir==='win2mac' && r.onlyOn && !r.onlyOn.includes(dstOs))
+        warns.push(`「${r.desc}」は ${osName(dstOs)} では同じようには動きません。個別に見直してください`);
+    }
+  }
+  return {raw:cur, warns, desc:descs.join(' / ')};
+}
+
+/* ----- 環境(グループ)の属性 -----
+ * 明示設定(locale/platform)が最優先。未設定の古いデータだけ名前から推測する。 */
+function localeOfGroup(groups, gi){
+  const g = (groups||[])[gi];
+  if(!g) return null;
+  if(g.locale!==undefined) return g.locale;      // null は「設定なし」
+  const n = (g.name||'').toUpperCase();
+  if(n.indexOf('JIS')>=0) return 'jis';
+  if(n.indexOf('DVORAK')>=0) return 'dvorak';
+  if(n.indexOf('UK')>=0) return 'uk';
+  if(n==='DE' || n.indexOf('GERMAN')>=0) return 'de';
+  if(n==='GEN' || n==='GENERAL' || n==='SHARED' || n==='COMMON') return null;
+  if(n.indexOf('US')>=0 || n.indexOf('ANSI')>=0) return 'us';
+  return null;
+}
+function platformOfGroup(groups, gi){
+  const g = (groups||[])[gi];
+  if(!g) return null;
+  if(g.platform!==undefined) return g.platform;
+  const n = (g.name||'').toUpperCase();
+  if(n.indexOf('MAC')>=0) return 'mac';
+  if(n.indexOf('WIN')>=0) return 'win';
+  if(n.indexOf('LINUX')>=0) return 'linux';
+  return null;
+}
+
+/* ----- コンボの環境依存 -----
+ * ZMKのコンボは既定で全レイヤーに効く。`layers` を指定すれば範囲を絞れるので、
+ * 出力が環境で変わるコンボは環境ごとに分けて定義する。 */
+
+/* ----- マクロ / tap-dance / 自作mod-morph の環境依存 -----
+ * コンボと同じ問題。定義は1つなのに複数の環境から呼ばれるため、
+ * 記号を出す定義は配列の違う環境で別の記号になる。
+ * コンボと違い、レイヤーのバインディングから参照されるので、
+ * 分割したら参照先も書き換える。 */
+
+/** 画面と警告文で使う種別の呼び名 */
+const BEH_KIND_LABEL = {morph:'mod-morph', td:'tap-dance', macro:'マクロ'};
+/** 自動生成した mod-morph は環境専用なので対象外にする */
+function isGeneratedMorph(name){ return /^jis_/.test(name||'') || /^loc_/.test(name||''); }
+
+/** 環境で変わりうる定義を集める。kind は 'morph' | 'td' | 'macro' */
+function collectBehaviorDefs(state){
+  const out = [];
+  const b = state.behaviors || {};
+  (b.morphs||[]).forEach((m,i)=>{ if(!isGeneratedMorph(m.name)) out.push({kind:'morph', index:i, name:m.name, def:m}); });
+  (b.tds||[]).forEach((d,i)=>out.push({kind:'td', index:i, name:d.name, def:d}));
+  ((state.macros||{}).items||[]).forEach((m,i)=>out.push({kind:'macro', index:i, name:m.name, def:m}));
+  return out;
+}
+/** 定義の中で「実際に入力される動作」を取り出す */
+function behaviorBindingsOf(kind, def){
+  if(kind==='morph') return [def.b1, def.b2];
+  if(kind==='td') return [...(def.bindings||[])];
+  return (def.steps||[]).map(s=>s.binding||'');
+}
+/** 取り出した動作を書き戻した複製を作る(元は変更しない) */
+function behaviorWithBindings(kind, def, name, arr){
+  if(kind==='morph') return Object.assign({}, def, {name, b1:arr[0], b2:arr[1]});
+  if(kind==='td')    return Object.assign({}, def, {name, bindings:arr.slice()});
+  return Object.assign({}, def, {name,
+    steps:(def.steps||[]).map((s,i)=> s.binding!==undefined? Object.assign({}, s, {binding:arr[i]}) : Object.assign({}, s))});
+}
+/** その定義を呼んでいる環境(グループ)の番号一覧 */
+function envIndicesUsingBehavior(state, name){
+  const rs = groupRanges(state.groups||[]);
+  const tok = '&'+name;
+  const set = new Set();
+  (state.layers||[]).forEach((L,li)=>{
+    const gi = rs.findIndex(r=>li>=r.start && li<r.start+r.count);
+    if(gi<0) return;
+    if((L.bindings||[]).some(b=>b.trim().split(/\s+/)[0]===tok)) set.add(gi);
+  });
+  return [...set].sort((a,b)=>a-b);
+}
+/** 複数の環境から呼ばれていて、環境によって出力が変わる定義を洗い出す */
+function findBehaviorEnvIssues(state){
+  const out = [];
+  collectBehaviorDefs(state).forEach(d=>{
+    const envs = envIndicesUsingBehavior(state, d.name);
+    if(envs.length < 2) return;
+    const base = envs[0];
+    const bLoc = localeOfGroup(state.groups, base), bOs = platformOfGroup(state.groups, base);
+    const src = behaviorBindingsOf(d.kind, d.def);
+    const diffs = [];
+    envs.slice(1).forEach(gi=>{
+      const conv = src.map(b=>convBindingFull(b, bLoc, localeOfGroup(state.groups, gi),
+        bOs, platformOfGroup(state.groups, gi), false, null, null).raw);
+      if(JSON.stringify(conv) !== JSON.stringify(src))
+        diffs.push({gi, name:(state.groups[gi]||{}).name||('#'+gi), bindings:conv});
+    });
+    if(diffs.length) out.push({kind:d.kind, index:d.index, name:d.name, def:d.def,
+      envs, base, baseName:(state.groups[base]||{}).name||('#'+base), bindings:src, diffs});
+  });
+  return out;
+}
+/** 定義を環境ごとに複製し、その環境のレイヤーの参照先を差し替える。
+ * 基準の環境はそのままにして、変更を最小限にする。作った名前を返す */
+function splitBehaviorForEnvs(state, issue){
+  const made = [];
+  const rs = groupRanges(state.groups||[]);
+  issue.diffs.forEach(d=>{
+    const sfx = (((state.groups[d.gi]||{}).name)||('g'+d.gi)).toLowerCase().replace(/[^a-z0-9_]/g,'') || ('g'+d.gi);
+    let nm = issue.name+'_'+sfx, n = 2;
+    const taken = ()=>collectBehaviorDefs(state).some(x=>x.name===nm);
+    while(taken()) nm = issue.name+'_'+sfx+(n++);
+    const copy = behaviorWithBindings(issue.kind, issue.def, nm, d.bindings);
+    if(issue.kind==='morph') state.behaviors.morphs.push(copy);
+    else if(issue.kind==='td') state.behaviors.tds.push(copy);
+    else state.macros.items.push(copy);
+    const r = rs[d.gi];
+    const from = '&'+issue.name, to = '&'+nm;
+    for(let li=r.start; li<r.start+r.count; li++){
+      state.layers[li].bindings = state.layers[li].bindings.map(b=>{
+        const t = b.trim().split(/\s+/);
+        if(t[0]!==from) return b;
+        t[0] = to;
+        return t.join(' ');
+      });
+    }
+    made.push(nm);
+  });
+  return made;
+}
+/** そのコンボが効く環境(グループ)の番号一覧。layers未指定なら全環境。 */
+function comboEnvIndices(combo, groups){
+  const rs = groupRanges(groups||[]);
+  if(!rs.length) return [];
+  const ls = (combo && combo.layers) || [];
+  if(!ls.length) return rs.map((r,i)=>i);
+  const set = new Set();
+  ls.forEach(n=>rs.forEach((r,i)=>{ if(n>=r.start && n<r.start+r.count) set.add(i); }));
+  return [...set].sort((a,b)=>a-b);
+}
+
+/** 基準の環境から見て、別の環境では出力が変わるコンボを洗い出す */
+function findComboEnvIssues(groups, combos){
+  const out = [];
+  (combos||[]).forEach((c, ci)=>{
+    const envs = comboEnvIndices(c, groups);
+    if(envs.length < 2) return;
+    const base = envs[0];
+    const bLoc = localeOfGroup(groups, base), bOs = platformOfGroup(groups, base);
+    const diffs = [];
+    envs.slice(1).forEach(gi=>{
+      const r = convBindingFull(c.binding, bLoc, localeOfGroup(groups, gi),
+        bOs, platformOfGroup(groups, gi), false, null, null);
+      if(r.raw !== c.binding)
+        diffs.push({gi, name:(groups[gi]||{}).name||('#'+gi), binding:r.raw, desc:r.desc});
+    });
+    if(diffs.length) out.push({ci, name:c.name, base, baseName:(groups[base]||{}).name||('#'+base),
+      binding:c.binding, envs, diffs});
+  });
+  return out;
+}
+
+/** 1つのコンボを環境ごとに分割する。元のコンボは基準環境に限定される。 */
+function splitComboForEnvs(combo, groups){
+  const rs = groupRanges(groups||[]);
+  const envs = comboEnvIndices(combo, groups);
+  if(envs.length < 2) return null;
+  const layersOf = gi=>{
+    const r = rs[gi];
+    return Array.from({length:r.count}, (_,k)=>r.start+k);
+  };
+  const base = envs[0];
+  const bLoc = localeOfGroup(groups, base), bOs = platformOfGroup(groups, base);
+  const sfx = gi=>((groups[gi]||{}).name||('g'+gi)).toLowerCase().replace(/[^a-z0-9_]/g,'') || ('g'+gi);
+  const first = Object.assign({}, combo, {name: combo.name+'_'+sfx(base), layers: layersOf(base)});
+  const rest = envs.slice(1).map(gi=>{
+    const r = convBindingFull(combo.binding, bLoc, localeOfGroup(groups, gi),
+      bOs, platformOfGroup(groups, gi), false, null, null);
+    return Object.assign({}, combo, {name: combo.name+'_'+sfx(gi), layers: layersOf(gi), binding: r.raw});
+  });
+  return [first].concat(rest);
+}
+
+/* ---------- 状態の保存・復元 ----------
+ * 保存先が複数ある(Undo履歴 / ブラウザ保存 / バックアップJSON)ため、
+ * 「何を保存するか」はこの1か所だけで決める。
+ * state に設定項目を足したら、必ずここにも足すこと。
+ * 入れ忘れは tests.js が自動で検出する。 */
+const STATE_KEYS = ['originalText','layers','groups','keyboard','combos','behaviors',
+  'trackball','conf','holdtap','macros','condLayers'];
+/** state から保存対象の項目だけを取り出す */
+function pickState(s){
+  const o = {};
+  STATE_KEYS.forEach(k=>{ o[k] = s? s[k] : undefined; });
+  return o;
+}
+
+/** グループ gi の末尾に空のレイヤーを足す。挿入位置を返す */
+function addLayerAt(state, gi, keyCount){
+  const rs = groupRanges(state.groups||[]);
+  const pos = rs[gi].start + rs[gi].count;
+  const n = keyCount || (state.layers[0]? state.layers[0].bindings.length : NUM_KEYS);
+  const perm = {};
+  for(let k=pos;k<state.layers.length;k++) perm[k] = k+1;
+  state.layers.splice(pos, 0, {name:'layer', displayName:null,
+    bindings:Array(n).fill('&trans'), sensor:null, shiftLayer:false});
+  state.groups[gi].count++;
+  remapAllRefs(state, perm);
+  return pos;
+}
+function permuteGroups(state, gi, gj){
+  const rs = groupRanges(state.groups);
+  const arr = state.groups.map((g,k)=>({g, idxs:Array.from({length:rs[k].count},(_,x)=>rs[k].start+x)}));
+  const t=arr[gi]; arr[gi]=arr[gj]; arr[gj]=t;
+  const newLayers=[]; const perm={};
+  arr.forEach(a=>a.idxs.forEach(oldI=>{ perm[oldI]=newLayers.length; newLayers.push(state.layers[oldI]); }));
+  state.layers = newLayers;
+  state.groups = arr.map(a=>a.g);
+  return perm;
+}
+/** グループ gi と gj を入れ替える */
+function swapGroups(state, gi, gj){
+  const perm = permuteGroups(state, gi, gj);
+  remapAllRefs(state, perm);
+  return perm;
+}
+/** レイヤー i の直後に複製を挿入する。挿入位置を返す */
+function copyLayerAt(state, i){
+  const rs = groupRanges(state.groups||[]);
+  const gi = rs.findIndex(r=>i>=r.start && i<r.start+r.count);
+  const pos = i+1;
+  const perm = {};
+  for(let k=pos;k<state.layers.length;k++) perm[k] = k+1;
+  const L = state.layers[i];
+  state.layers.splice(pos, 0, {name:L.name, displayName:null, bindings:[...L.bindings],
+    sensor:L.sensor, shiftLayer:!!L.shiftLayer});
+  if(gi>=0) state.groups[gi].count++;
+  remapAllRefs(state, perm);
+  return pos;
+}
+/** レイヤー i を削除する。i への参照は fw0 に付け替える。
+ * 空になったグループも消す。最後の1枚は消せないので null を返す */
+function deleteLayerAt(state, i){
+  if(!state.layers || state.layers.length<=1) return null;
+  const rs = groupRanges(state.groups||[]);
+  const gi = rs.findIndex(r=>i>=r.start && i<r.start+r.count);
+  const perm = {}; perm[i] = 0;
+  for(let k=i+1;k<state.layers.length;k++) perm[k] = k-1;
+  state.layers.splice(i, 1);
+  if(gi>=0) state.groups[gi].count--;
+  remapAllRefs(state, perm);
+  let removedGroup = false;
+  if(gi>=0 && state.groups[gi].count===0){ state.groups.splice(gi,1); removedGroup = true; }
+  // 付け替えで同じ番号が並ぶことがあるので整理する
+  (state.combos||[]).forEach(c=>{ if(c.layers) c.layers = [...new Set(c.layers)].sort((a,b)=>a-b); });
+  (state.condLayers||[]).forEach(c=>{ c.ifLayers = [...new Set(c.ifLayers)].sort((a,b)=>a-b); });
+  return {perm, removedGroup, groupIndex:gi};
+}
+/** レイヤーを from から target へ動かす。グループの員数も調整する */
+function moveLayerAt(state, from, target, forceToGi){
+  if(from===target) return null;
+  const rs = groupRanges(state.groups||[]);
+  const fromGi = rs.findIndex(r=>from>=r.start && from<r.start+r.count);
+  let toGi = (forceToGi!==undefined && forceToGi!==null)
+    ? forceToGi
+    : rs.findIndex(r=>target>=r.start && target<r.start+r.count);
+  if(toGi<0) toGi = state.groups.length-1;   // 末尾へ落とした場合
+  state.groups[fromGi].count--;
+  state.groups[toGi].count++;
+  const perm = reorderLayers(state, orderForMove(state.layers.length, from, target));
+  let removedGroup = false;
+  if(state.groups[fromGi].count===0){ state.groups.splice(fromGi,1); removedGroup = true; }
+  return {perm, removedGroup, fromGi, toGi};
+}
+/** order[新しい位置] = 元の位置。並べ替えて全参照を追従させ、対応表を返す */
+function reorderLayers(state, order){
+  const perm = {};
+  order.forEach((oldI, ni)=>{ if(oldI!==ni) perm[oldI] = ni; });
+  state.layers = order.map(o=>state.layers[o]);
+  remapAllRefs(state, perm);
+  return perm;
+}
+/** レイヤーを from から target の位置へ動かすときの order を作る(計算のみ) */
+function orderForMove(n, from, target){
+  const order = [...Array(n).keys()];
+  if(from===target) return order;
+  order.splice(from, 1);
+  order.splice(from < target ? target-1 : target, 0, from);
+  return order;
+}
+/** グループ gi を gj の位置へ動かすときの order を作る(計算のみ) */
+function orderForGroupMove(groups, gi, gj){
+  const rs = groupRanges(groups);
+  const arr = rs.map((r,k)=>({k, idxs:Array.from({length:r.count},(_,x)=>r.start+x)}));
+  const item = arr.splice(gi,1)[0];
+  arr.splice(gi < gj ? gj-1 : gj, 0, item);
+  return {order: arr.flatMap(a=>a.idxs), groupOrder: arr.map(a=>a.k)};
+}
+function remapAllRefs(state, perm){
+  const fix = b=>{
+    const t=b.trim().split(/\s+/);
+    const mp = v=> perm[Number(v)]!==undefined? String(perm[Number(v)]) : v;
+    if(['&mo','&to','&tog','&sl'].includes(t[0]) && t[1]!==undefined){ t[1]=mp(t[1]); return t.join(' '); }
+    if((t[0]==='&lt'||t[0]==='&lt_to_layer_0'||LAYER_PARAM_HTS.has(t[0].slice(1))) && t[1]!==undefined){ t[1]=mp(t[1]); return t.join(' '); }
+    return b;
+  };
+  state.layers.forEach(L=>{ L.bindings = L.bindings.map(fix); });
+  (state.combos||[]).forEach(c=>{ c.binding = fix(c.binding); if(c.layers) c.layers = c.layers.map(x=> perm[x]!==undefined? perm[x] : x).sort((a,b)=>a-b); });
+  const tb = state.trackball;
+  if(tb){
+    if(tb.automouseLayer!==null && tb.automouseLayer!==undefined && perm[tb.automouseLayer]!==undefined) tb.automouseLayer = perm[tb.automouseLayer];
+    tb.scrollLayers = (tb.scrollLayers||[]).map(x=> perm[x]!==undefined? perm[x] : x).sort((a,b)=>a-b);
+    tb.snipeLayers = (tb.snipeLayers||[]).map(x=> perm[x]!==undefined? perm[x] : x).sort((a,b)=>a-b);
+  }
+  (state.condLayers||[]).forEach(c=>{
+    c.ifLayers = c.ifLayers.map(x=> perm[x]!==undefined? perm[x] : x).sort((a,b)=>a-b);
+    if(perm[c.thenLayer]!==undefined) c.thenLayer = perm[c.thenLayer];
+  });
+}
+
+/* ---------- 整合性チェック(書き出し前の点検) ----------
+ * 状態と対象OSを引数で受け取る。表示用の文言までここで作る。 */
+function runValidation(state, osTargets){
+  const issues=[];
+  const n = state.layers.length;
+  const layerRef = b=>{
+    const t=b.trim().split(/\s+/);
+    if(['&mo','&to','&tog','&sl','&lt','&lt_to_layer_0'].includes(t[0]) && t[1]!==undefined) return [Number(t[1])];
+    return [];
+  };
+  const knownBeh = new Set(['kp','mt','lt','mo','to','tog','sl','trans','none','mkp','msc','bt','out','rgb_ug',
+    'bootloader','sys_reset','caps_word','key_repeat','sk','mmv','inc_dec_kp','lt_to_layer_0','to_layer_0']);
+  state.behaviors.morphs.forEach(m=>knownBeh.add(m.name));
+  state.behaviors.tds.forEach(t=>knownBeh.add(t.name));
+  state.behaviors.raws.forEach(r=>knownBeh.add(r.name));
+  (state.behaviors.hts||[]).forEach(h=>knownBeh.add(h.name));
+  if(state.macros){ state.macros.items.forEach(m=>knownBeh.add(m.name)); state.macros.raws.forEach(r=>knownBeh.add(r.name)); }
+  for(const k in JIS_MORPHS) knownBeh.add(JIS_MORPHS[k].name);
+  state.layers.forEach((L,li)=>{
+    L.bindings.forEach((b,ki)=>{
+      layerRef(b).forEach(x=>{ if(isNaN(x)||x<0||x>=n) issues.push(`${gnameFor(state.groups, li)} pos${ki}: 存在しないレイヤーへの参照 (${b})`); });
+      const nm = b.trim().slice(1).split(/\s+/)[0];
+      if(nm && !knownBeh.has(nm)) issues.push(`${gnameFor(state.groups, li)} pos${ki}: 未定義のビヘイビア &${nm}`);
+    });
+  });
+  const seen={};
+  state.combos.forEach(c=>{
+    const key=[...c.keyPositions].sort((a,b)=>a-b).join(',');
+    if(seen[key]) issues.push(`コンボ "${c.name}" と "${seen[key]}" のキー位置が重複しています`);
+    else seen[key]=c.name;
+    c.keyPositions.forEach(p=>{ if(p<0||p>=NUM_KEYS) issues.push(`コンボ "${c.name}": キー位置 ${p} は範囲外です`); });
+    (c.layers||[]).forEach(x=>{ if(x<0||x>=n) issues.push(`コンボ "${c.name}": 存在しないレイヤー ${x} を指定しています`); });
+    const nm = c.binding.trim().slice(1).split(/\s+/)[0];
+    if(nm && !knownBeh.has(nm)) issues.push(`コンボ "${c.name}": 未定義のビヘイビア &${nm}`);
+    layerRef(c.binding).forEach(x=>{ if(isNaN(x)||x<0||x>=n) issues.push(`コンボ "${c.name}": 存在しないレイヤーへの参照`); });
+  });
+  const tb = state.trackball;
+  if(tb){
+    if(tb.automouseLayer!==null && tb.automouseLayer!==undefined && (tb.automouseLayer<0||tb.automouseLayer>=n)) issues.push('トラックボール: オートマウスレイヤが範囲外です');
+    (tb.scrollLayers||[]).forEach(x=>{ if(x<0||x>=n) issues.push('トラックボール: スクロールレイヤー '+x+' が範囲外です'); });
+    (tb.snipeLayers||[]).forEach(x=>{ if(x<0||x>=n) issues.push('トラックボール: スナイプレイヤー '+x+' が範囲外です'); });
+  }
+  state.behaviors.morphs.forEach(m=>{ if(!m.b1||!m.b2) issues.push(`mod-morph "${m.name}": 動作が未設定です`); });
+  state.behaviors.tds.forEach(t=>{ if(t.bindings.length<2) issues.push(`tap-dance "${t.name}": タップ動作が2つ未満です`); });
+  if(state.macros) state.macros.items.forEach(m=>{
+    if(!m.steps.length) issues.push(`マクロ "${m.name}": ステップがありません`);
+    if(m.steps.some(s=>s.type!=='wait' && !s.binding)) issues.push(`マクロ "${m.name}": 未設定のステップがあります`);
+  });
+  // レイヤー順序の検査(ZMKの優先順位に起因する不具合)
+  (function(){
+    const sh = findShadowedRefs(state.groups||[], state.layers);
+    const byTarget = new Map();
+    sh.forEach(x=>{
+      const k = x.groupName+'→'+x.target;
+      if(!byTarget.has(k)) byTarget.set(k, {x, n:0});
+      byTarget.get(k).n++;
+    });
+    byTarget.forEach(v=>{
+      issues.push(`⚠ ${v.x.groupName} から呼び出している fw${v.x.target} は、番号が小さいため無視されます`
+        + `(${v.n}箇所)。番号の大きいレイヤーが優先されるZMKの仕様によるものです。`
+        + `「⇅ レイヤー順序を点検」で修正できます`);
+    });
+  })();
+  // コンボは全レイヤーで効くため、環境をまたぐと別の記号が出ることがある
+  findComboEnvIssues(state.groups||[], state.combos||[]).forEach(x=>{
+    issues.push(`⚠ コンボ "${x.name}" は ${x.baseName} 以外の環境では別の入力になります`
+      + `(${x.diffs.map(d=>d.name).join(' / ')})。`
+      + `「Combo」画面の「環境ごとに分ける」で修正できます`);
+  });
+  // マクロ等も複数の環境から呼ばれると、環境によって別の入力になる
+  findBehaviorEnvIssues(state).forEach(x=>{
+    issues.push(`⚠ ${BEH_KIND_LABEL[x.kind]||x.kind} "${x.name}" は ${x.baseName} 以外の環境では別の入力になります`
+      + `(${x.diffs.map(d=>d.name).join(' / ')})。`
+      + `「${BEH_KIND_LABEL[x.kind]||x.kind}」画面の「環境ごとに分ける」で修正できます`);
+  });
+  findBaseTransIssues(state.groups||[], state.layers).forEach(x=>{
+    issues.push(`⚠ ${x.groupName} の最初のレイヤーに透過(▽)が ${x.positions.length} 箇所あります(pos ${x.positions.slice(0,6).join(',')}${x.positions.length>6?'…':''})。`
+      + `レイヤー0は常に有効なため、その位置だけ最初の環境の割り当てが出てしまいます`);
+  });
+
+  // 使用OSで無反応になるキーコードの検出
+  const osIssues = new Map();
+  const targets = (osTargets && osTargets.length)? osTargets : ['win','mac','linux'];
+  const scanOs = (b, where)=>{
+    findOsIssues(b, targets).forEach(x=>{
+      if(!osIssues.has(x.kc)) osIssues.set(x.kc, {x, n:0});
+      osIssues.get(x.kc).n++;
+    });
+  };
+  state.layers.forEach((L,li)=>L.bindings.forEach((b,ki)=>scanOs(b, gnameFor(state.groups, li)+' pos'+ki)));
+  state.combos.forEach(c=>scanOs(c.binding, 'Combo:'+c.name));
+  osIssues.forEach(v=>{
+    const names = v.x.bad.map(id=>(OS_LIST.find(o=>o.id===id)||{}).name).join('/');
+    issues.push(`⚠ ${v.x.kc} は ${names} では反応しません(${v.n}箇所)。`
+      + (v.x.alt? `${v.x.alt} への置き換えを推奨します — ` : '') + '「☰ メニュー → OS互換チェック」で確認できます');
+  });
+  (state.condLayers||[]).forEach(c=>{
+    c.ifLayers.forEach(x=>{ if(x<0||x>=n) issues.push(`条件付きレイヤー "${c.name}": 存在しないレイヤー ${x} を条件にしています`); });
+    if(c.thenLayer<0||c.thenLayer>=n) issues.push(`条件付きレイヤー "${c.name}": ONにするレイヤーが範囲外です`);
+    if(c.ifLayers.includes(c.thenLayer)) issues.push(`条件付きレイヤー "${c.name}": 条件とONにするレイヤーが同じです`);
+    if(c.ifLayers.length<2) issues.push(`条件付きレイヤー "${c.name}": 条件のレイヤーは2つ以上を推奨します`);
+  });
+  return [...new Set(issues)];
+}
+
+if (typeof module !== 'undefined') module.exports = {parseKeymap, generateKeymap, convBinding, convBindingUs, remapRefsOnly, normBinding, convertLayerToJis, convertAllToJis, groupRanges, gnameFor, buildJisMaps, nodeNameFor, parseHoldtapOne, patchHoldtapOne, parseStickyOne, patchStickyOne, parseMacros, genMacrosInner, parseMacroSteps, genMacroBindings, parseCondLayers, genCondLayersInner, charFor, TERMS, term, remapWithinEnv, buildEnvOffsetMap, WITHIN_ENV_REFS, layerRefTargets, findShadowedRefs, orderToFixShadowing, findBaseTransIssues, LOCALE_CHARS, LOCALE_LIST, localeIndex, getLocaleIndex, charOfKeycode, keycodeForChar, convBindingLocale, SYM_TO_LS, parseRepoRef, utf8ToBase64, base64ToUtf8, pickConfigFiles, I18N_EN, tr, setLang, getLang, OS_LIST, OS_COMPAT, OS_INDEX, keycodesIn, findOsIssues, fixOsIssues, PLATFORM_PAIRS, convBindingPlatform, canonBinding, OS_FAMILY, platformDir, osName, swapMainMod, findWinIncompatible, fixWinIncompatible, KEYBOARD, ROBA_PROFILE, setKeyboard, getKeyboard, parsePhysicalLayout, deriveRows, gridKeys, makeEmptyKeymap, APP_VERSION, canon, kcLabel, JIS_MAP, REV_MAP, US_TO_JIS_ORDER, tokenizeBindings, DEFAULT_KEYMAP, NUM_KEYS, bindingLabel, JIS_MORPHS, convBindingFull, localeOfGroup, platformOfGroup, comboEnvIndices, findComboEnvIssues, splitComboForEnvs, BEH_KIND_LABEL, isGeneratedMorph, collectBehaviorDefs, behaviorBindingsOf, behaviorWithBindings, envIndicesUsingBehavior, findBehaviorEnvIssues, splitBehaviorForEnvs, STATE_KEYS, pickState, runValidation, remapAllRefs, reorderLayers, orderForMove, orderForGroupMove, copyLayerAt, deleteLayerAt, moveLayerAt, addLayerAt, swapGroups, permuteGroups, parseCombos, parseBehaviors, parseTrackball, patchTrackball, genConf, CONF_DEFAULTS, PHYS};
 </script>
 
 <script>
@@ -2649,37 +3275,9 @@ function migrate13to12(){
     tb.snipeLayers = [...new Set((tb.snipeLayers||[]).map(x=>x===12?6:x))].sort((a,b)=>a-b);
   }
 }
-function remapAllRefs(perm){
-  const fix = b=>{
-    const t=b.trim().split(/\s+/);
-    const mp = v=> perm[Number(v)]!==undefined? String(perm[Number(v)]) : v;
-    if(['&mo','&to','&tog','&sl'].includes(t[0]) && t[1]!==undefined){ t[1]=mp(t[1]); return t.join(' '); }
-    if((t[0]==='&lt'||t[0]==='&lt_to_layer_0'||LAYER_PARAM_HTS.has(t[0].slice(1))) && t[1]!==undefined){ t[1]=mp(t[1]); return t.join(' '); }
-    return b;
-  };
-  state.layers.forEach(L=>{ L.bindings = L.bindings.map(fix); });
-  state.combos.forEach(c=>{ c.binding = fix(c.binding); if(c.layers) c.layers = c.layers.map(x=> perm[x]!==undefined? perm[x] : x).sort((a,b)=>a-b); });
-  const tb = state.trackball;
-  if(tb){
-    if(tb.automouseLayer!==null && tb.automouseLayer!==undefined && perm[tb.automouseLayer]!==undefined) tb.automouseLayer = perm[tb.automouseLayer];
-    tb.scrollLayers = (tb.scrollLayers||[]).map(x=> perm[x]!==undefined? perm[x] : x).sort((a,b)=>a-b);
-    tb.snipeLayers = (tb.snipeLayers||[]).map(x=> perm[x]!==undefined? perm[x] : x).sort((a,b)=>a-b);
-  }
-  (state.condLayers||[]).forEach(c=>{
-    c.ifLayers = c.ifLayers.map(x=> perm[x]!==undefined? perm[x] : x).sort((a,b)=>a-b);
-    if(perm[c.thenLayer]!==undefined) c.thenLayer = perm[c.thenLayer];
-  });
-}
-function permuteGroups(state, gi, gj){
-  const rs = groupRanges(state.groups);
-  const arr = state.groups.map((g,k)=>({g, idxs:Array.from({length:rs[k].count},(_,x)=>rs[k].start+x)}));
-  const t=arr[gi]; arr[gi]=arr[gj]; arr[gj]=t;
-  const newLayers=[]; const perm={};
-  arr.forEach(a=>a.idxs.forEach(oldI=>{ perm[oldI]=newLayers.length; newLayers.push(state.layers[oldI]); }));
-  state.layers = newLayers;
-  state.groups = arr.map(a=>a.g);
-  return perm;
-}
+/** 並べ替え後の番号 perm(旧→新) を、状態のあらゆる参照へ反映する。
+ * 対象: レイヤーのバインディング / コンボ(動作と layers) /
+ *       トラックボール(自動マウス・スクロール・スナイプ) / 条件付きレイヤー */
 function renameGroup(gi, newName){
   const name = (newName||'').replace(/[^A-Za-z]/g,'').toUpperCase();
   if(!name){ alert('グループ名は半角英字で入力してください'); return; }
@@ -2695,8 +3293,7 @@ function moveGroup(gi, dir){
   if(gi===0 || gj===0){
     if(!confirm('fw0(起動時の既定レイヤー)が変わります。&to/&mo等の参照番号は自動で追従します。続行しますか?')) return;
   }
-  const perm = permuteGroups(state, gi, gj);
-  remapAllRefs(perm);
+  const perm = swapGroups(state, gi, gj);
   activeLayer = perm[activeLayer]!==undefined? perm[activeLayer] : 0;
   renderAll();
 }
@@ -2738,8 +3335,7 @@ function upgradeState(){
 let undoStack = [], redoStack = [], restoringHistory = false;
 const HISTORY_MAX = 50;
 function snapshotStr(){
-  return JSON.stringify({originalText:state.originalText, layers:state.layers, groups:state.groups, keyboard:state.keyboard,
-    combos:state.combos, behaviors:state.behaviors, trackball:state.trackball, conf:state.conf, holdtap:state.holdtap, macros:state.macros, condLayers:state.condLayers});
+  return JSON.stringify(pickState(state));
 }
 function updateHistoryButtons(){
   const u = document.getElementById('btn-undo'), r = document.getElementById('btn-redo');
@@ -2748,11 +3344,7 @@ function updateHistoryButtons(){
 }
 function applySnapshot(snap){
   restoringHistory = true;
-  pendingConv = null;
-  document.getElementById('conv-bg').classList.remove('open');
-  const o = JSON.parse(snap);
-  state = {originalText:o.originalText, layers:o.layers, groups:o.groups, keyboard:o.keyboard, combos:o.combos,
-    behaviors:o.behaviors, trackball:o.trackball, conf:o.conf, holdtap:o.holdtap, macros:o.macros, condLayers:o.condLayers};
+  state = pickState(JSON.parse(snap));
   if(!state.keyboard) state.keyboard = pickKeyboardFor(state.layers[0].bindings.length);
   if(activeLayer >= state.layers.length) activeLayer = state.layers.length-1;
   renderAll();
@@ -2801,7 +3393,7 @@ function load(){
     let s = localStorage.getItem('roba_keymap_state_v4') || localStorage.getItem('roba_keymap_state_v3');
     if(s){
       const o = JSON.parse(s);
-      state = {originalText:o.originalText, layers:o.layers, groups:o.groups, keyboard:o.keyboard, combos:o.combos, behaviors:o.behaviors, trackball:o.trackball, conf:o.conf, holdtap:o.holdtap, macros:o.macros, condLayers:o.condLayers};
+      state = pickState(o);
       upgradeState();
       if(state.keyboard) setKeyboard(state.keyboard);
       activeLayer = Math.min(o.activeLayer||0, o.layers.length-1);
@@ -2840,28 +3432,74 @@ let layerDragIdx = null, groupDragGi = null;
 
 /* ----- layer groups ----- */
 /** グループの配列規格。未設定なら名前から推測(US/JIS など従来の運用と互換) */
-function groupLocale(gi){
-  const g = state.groups[gi];
-  if(!g) return 'us';
-  if(g.locale) return g.locale;
-  const n = (g.name||'').toUpperCase();
-  if(n.indexOf('JIS')>=0) return 'jis';
-  if(n.indexOf('DVORAK')>=0) return 'dvorak';
-  if(n.indexOf('UK')>=0) return 'uk';
-  if(n==='DE' || n.indexOf('GERMAN')>=0) return 'de';
-  return 'us';
+function groupLocale(gi){ return localeOfGroup(state.groups, gi); }
+function groupPlatform(gi){ return platformOfGroup(state.groups, gi); }
+/** 環境の設定(配列 × OS)を短く言い表す */
+function localeName(id, short){
+  const n = id? ((LOCALE_LIST.find(l=>l.id===id)||{}).name || id) : null;
+  // チップに収まるよう、短縮時は補足の括弧を落とす: 「JIS (日本語)」→「JIS」
+  return (n && short)? n.replace(/\s*[（(].*$/, '') : n;
 }
-/** グループの対象OS。未設定なら null(共通) */
-function groupPlatform(gi){
-  const g = state.groups[gi];
-  if(!g) return null;
-  if(g.platform) return g.platform;
-  const n = (g.name||'').toUpperCase();
-  if(n.indexOf('MAC')>=0) return 'mac';
-  if(n.indexOf('WIN')>=0) return 'win';
-  if(n.indexOf('LINUX')>=0) return 'linux';
-  return null;
+function envSummary(gi, short){
+  const loc = groupLocale(gi), os = groupPlatform(gi);
+  const ln = localeName(loc, short);
+  const on = os? osName(os) : null;
+  if(ln && on) return {text: ln+' × '+on, unset:false};
+  if(ln || on)  return {text: ln || on, unset:false};
+  return {text:'配列 / OS を設定', unset:true};
 }
+let envSetGi = -1;
+function openEnvSettings(gi){
+  envSetGi = gi;
+  document.getElementById('es-name').textContent = (state.groups[gi]||{}).name || '';
+  fillLocaleSelect(document.getElementById('es-loc'), groupLocale(gi));
+  fillOsSelect(document.getElementById('es-os'), groupPlatform(gi));
+  envSetNote();
+  document.getElementById('es-loc').onchange = envSetNote;
+  document.getElementById('es-os').onchange = envSetNote;
+  document.getElementById('envset-bg').classList.add('open');
+}
+function envSetNote(){
+  const loc = document.getElementById('es-loc').value || null;
+  const os = document.getElementById('es-os').value || null;
+  const el = document.getElementById('es-note');
+  if(!loc && !os){
+    el.textContent = 'どちらも「設定なし」です。変換の対象外になるため、'
+      + 'どの環境からも呼び出す共通の層として使えます（マウスやBluetoothなど）。';
+    return;
+  }
+  const other = state.groups.map((g,i)=>i).filter(i=>i!==envSetGi
+    && (localeOfGroup(state.groups,i) || platformOfGroup(state.groups,i)));
+  const fam = os? OS_FAMILY[os] : null;
+  const same = other.filter(i=>{
+    const o2 = platformOfGroup(state.groups, i);
+    return localeOfGroup(state.groups,i)===loc && (o2? OS_FAMILY[o2] : null)===fam;
+  });
+  el.textContent = same.length
+    ? `${same.map(i=>state.groups[i].name).join(' / ')} と同じ設定です。同期しても変換は起きません。`
+    : '「⇆ 環境間の同期」で、他の環境からこの設定に合わせて変換できます。';
+}
+document.getElementById('es-save').onclick = ()=>{
+  if(envSetGi < 0) return;
+  const loc = document.getElementById('es-loc').value || null;
+  const os = document.getElementById('es-os').value || null;
+  const g = state.groups[envSetGi];
+  const changed = (g.locale!==loc) || (g.platform!==os);
+  g.locale = loc; g.platform = os;
+  const nm = g.name;
+  envSetGi = -1;
+  closeModal('envset-bg');
+  renderAll();
+  if(changed){
+    const s = envSummary(state.groups.findIndex(x=>x.name===nm), true);
+    document.getElementById('warnings').innerHTML = '<div class="warnbox">'
+      + esc(`✅ 「${nm}」の設定を ${s.text} にしました。配置は変えていません。`
+            + `他の環境から合わせるには「⇆ 環境間の同期」を使ってください。`)+'</div>';
+  }
+};
+/** グループの数。1以下なら環境まわりのUIを隠す */
+function envCount(){ return (state.groups||[]).length; }
+function isSimpleMode(){ return envCount() <= 1; }
 function groupIndexOfLayer(i){
   const rs = groupRanges(state.groups||[]);
   return rs.findIndex(r=>i>=r.start && i<r.start+r.count);
@@ -2869,7 +3507,8 @@ function groupIndexOfLayer(i){
 /** レイヤーの表示に使う配列規格 */
 function layerLocale(i){
   const gi = groupIndexOfLayer(i);
-  return gi>=0? groupLocale(gi) : 'us';
+  const loc = gi>=0? groupLocale(gi) : null;
+  return loc || 'us';   // 設定なしのときはキーコード名どおり(US相当)で表示する
 }
 function groupOf(i){
   if(!state || !state.groups) return 'MAIN';
@@ -3083,16 +3722,16 @@ function renderLayers(){
   const bar = document.getElementById('layerbar');
   bar.innerHTML='';
   const rs = groupRanges(state.groups||[]);
+  const simple = isSimpleMode();
   rs.forEach((r,gi)=>{
     const row=document.createElement('div'); row.className='lrow';
     const cls = r.name==='US'?'us': r.name==='JIS'?'jis': r.name==='GEN'?'gen':'oth';
     const gcol = state.groups[gi].color || null;
     const s=document.createElement('span'); s.className='lsep '+cls; s.textContent=r.name;
-    const shared = isSharedGroup(state.groups[gi]);
-    s.title = (shared? '共有レイヤー(どの環境からも使う層)' : '環境(キーボード配列 × OS)')
-      + ' / ダブルクリックで名前変更';
+    s.title = '環境(キーボード配列 × OS) / ダブルクリックで名前変更';
     s.style.cursor = 'pointer';
     if(gcol){ s.style.color = gcol; s.style.borderLeftColor = gcol; }
+    if(simple) s.style.display = 'none';
     s.ondblclick = ()=>inlineEdit(s, r.name, v=>{ if(v) renameGroup(gi, v); renderAll(); });
     s.draggable = true;
     s.ondragstart = e=>{ groupDragGi = gi; e.dataTransfer.effectAllowed='move'; };
@@ -3117,6 +3756,7 @@ function renderLayers(){
     cp.title='グループの色を変更';
     cp.value = gcol || ({US:'#4da3ff', JIS:'#55d6e8', GEN:'#ffcc66'})[r.name] || '#9aa3b2';
     // 選択中はDOMを再構築せずその場で色だけ反映(パレットが閉じないように)
+    if(simple) cp.style.display = 'none';
     cp.oninput = e=>{
       const col = e.target.value;
       state.groups[gi].color = col;
@@ -3128,27 +3768,43 @@ function renderLayers(){
     cp.onchange = ()=>{ save(); renderAll(); };
     row.appendChild(cp);
     // 役割と設定を小さく添える
+    const loc = groupLocale(gi), os = groupPlatform(gi);
+    const neutral = !loc && !os;
     const role = document.createElement('span');
-    role.className = 'envrole ' + (shared? 'shared':'base');
-    role.textContent = shared? '共有' : (gi===0? 'ベース' : '環境');
-    role.title = shared
-      ? 'どの環境からも呼び出す層。全ての環境より後ろに置く必要があります'
-      : (gi===0? '起動時に有効になる環境。ここを基準に他の環境を作ります' : 'ベース環境から作られる環境');
+    role.className = 'envrole ' + (neutral? 'shared':'base');
+    role.textContent = neutral? '設定なし' : (gi===0? 'ベース' : '環境');
+    if(simple) role.style.display = 'none';
+    role.title = neutral
+      ? '配列もOSも設定されていません。変換の対象外になるので、どの環境からも呼び出す層に向いています'
+      : (gi===0? '起動時に有効になる環境。ここを基準に他の環境を作ります' : '同期で作られる環境');
     row.appendChild(role);
-    if(!shared){
+    // 設定(配列 × OS)。クリックでその場で変更できる
+    const chip = document.createElement('span');
+    const sum = envSummary(gi, true);
+    chip.className = 'envchip' + (sum.unset? ' unset':'');
+    chip.textContent = sum.text;
+    chip.title = sum.unset
+      ? 'キーボード配列とOSが未設定です。クリックして設定できます'
+      : `キーボード配列 × OS: ${envSummary(gi).text} / クリックで変更`;
+    chip.onclick = ()=>openEnvSettings(gi);
+    if(simple) chip.style.display = 'none';
+    row.appendChild(chip);
+    if(!neutral){
       const meta = document.createElement('span');
       meta.className = 'envmeta';
-      const locName = (LOCALE_LIST.find(l=>l.id===groupLocale(gi))||{}).name || groupLocale(gi);
-      const os = groupPlatform(gi);
-      const osName = os? ({win:'Windows',mac:'macOS',linux:'Linux'})[os]||os : '';
+      const locName = loc? ((LOCALE_LIST.find(l=>l.id===loc)||{}).name || loc) : '配列なし';
+      const osName = os? (({win:'Windows',mac:'macOS',linux:'Linux'})[os]||os) : '';
       meta.textContent = locName + (osName? ' · '+osName : '');
       meta.title = 'キーボード配列(OSの設定) と OS。「⇆ 環境間の同期」で設定できます';
+      if(simple) meta.style.display = 'none';
       row.appendChild(meta);
     }
     const up=document.createElement('button'); up.className='gbtn'; up.textContent='▲';
+    if(simple) up.style.display = 'none';
     up.title='上へ移動(レイヤー番号と参照は自動で調整されます)'; up.disabled = gi===0;
     up.onclick=()=>moveGroup(gi,-1);
     const dn=document.createElement('button'); dn.className='gbtn'; dn.textContent='▼';
+    if(simple) dn.style.display = 'none';
     dn.title='下へ移動(レイヤー番号と参照は自動で調整されます)'; dn.disabled = gi===rs.length-1;
     dn.onclick=()=>moveGroup(gi,1);
     row.appendChild(up); row.appendChild(dn);
@@ -3221,7 +3877,9 @@ function renderLayers(){
   const gadd = document.createElement('button');
   gadd.className = 'gbtn';
   gadd.textContent = '＋ 環境';
-  gadd.title = '環境(または共有レイヤー)を末尾に追加';
+  gadd.title = isSimpleMode()
+    ? '別のキーボード配列やOS向けの環境を追加します（複数の機種で同じ操作感にしたいとき）'
+    : '環境(または共有レイヤー)を末尾に追加';
   gadd.onclick = addGroupFlow;
   grow.appendChild(gadd);
   grow.ondragover = e=>{ if(groupDragGi!==null){ e.preventDefault(); e.dataTransfer.dropEffect='move'; grow.classList.add('ginsert'); } };
@@ -3257,14 +3915,12 @@ function renderAll(){
   if(co){ co.textContent = '⊞ Combo表示: '+(comboOverlay?'ON':'OFF'); co.classList.toggle('shifton', comboOverlay); }
   const tbb = document.getElementById('btn-trackball');
   if(tbb) tbb.style.display = (state.keyboard && state.keyboard.features && state.keyboard.features.trackball)? '' : 'none';
-  const bj = document.getElementById('btn-jis');
-  if(bj){
-    const dir = groupOf(activeLayer)==='JIS' ? 'jis2us' : 'us2jis';
-    const cnt = convDiffCount(dir);
-    bj.textContent = (dir==='us2jis'? '⇄ US→JIS変換':'⇄ JIS→US変換') + (cnt? ` (${cnt})`:'');
-    bj.disabled = cnt===0;
-    bj.title = cnt? `入力結果に差異のあるキーが ${cnt} 件あります。内容を確認して変換できます` : '変換が必要な差異はありません';
-  }
+  // 環境が1つだけなら、環境まわりの機能は見せない
+  const simpleNow = isSimpleMode();
+  ['btn-platform','btn-switcher','btn-order'].forEach(id=>{
+    const el = document.getElementById(id);
+    if(el) el.style.display = simpleNow? 'none' : '';
+  });
   save();
 }
 
@@ -3579,11 +4235,7 @@ function layerRefsTo(idx){
   return refs;
 }
 function applyOrder(order){
-  // order[newIdx] = oldIdx
-  const perm = {};
-  order.forEach((oldI, ni)=>{ if(oldI!==ni) perm[oldI] = ni; });
-  state.layers = order.map(o=>state.layers[o]);
-  remapAllRefs(perm);
+  const perm = reorderLayers(state, order);
   if(perm[activeLayer]!==undefined) activeLayer = perm[activeLayer];
 }
 function moveLayerTo(from, target){
@@ -3595,45 +4247,20 @@ function moveLayerTo(from, target){
     // グループをまたぐ移動: 移動先グループの target 位置の前に挿入
     if(state.groups[fromGi].count<=1 && !confirm('グループ「'+state.groups[fromGi].name+'」が空になるため削除されます。続行しますか?')) return;
   }
-  const n = state.layers.length;
-  const order = [...Array(n).keys()];
-  order.splice(from,1);
-  let ins = target;
-  if(from<target) ins--;
-  order.splice(ins,0,from);
-  state.groups[fromGi].count--;
-  state.groups[toGi].count++;
-  applyOrder(order);
-  if(state.groups[fromGi].count===0) state.groups.splice(fromGi,1);
-  activeLayer = ins;
+  const r = moveLayerAt(state, from, target);
+  if(r && r.perm[activeLayer]!==undefined) activeLayer = r.perm[activeLayer];
   renderAll();
 }
 function moveGroupTo(gi, gj){
   if(gi===gj) return;
   if((gi===0 || gj===0) && !confirm('fw0(起動時の既定レイヤー)が変わります。参照番号は自動で追従します。続行しますか?')) return;
-  const rs = groupRanges(state.groups);
-  const arr = state.groups.map((g,k)=>({g, idxs:Array.from({length:rs[k].count},(_,x)=>rs[k].start+x)}));
-  const item = arr.splice(gi,1)[0];
-  let ins = gj;
-  if(gi<gj) ins--;
-  arr.splice(ins,0,item);
-  const order=[];
-  arr.forEach(a=>a.idxs.forEach(o=>order.push(o)));
-  state.groups = arr.map(a=>a.g);
+  const {order, groupOrder} = orderForGroupMove(state.groups, gi, gj);
+  state.groups = groupOrder.map(k=>state.groups[k]);
   applyOrder(order);
   renderAll();
 }
 function copyLayer(i){
-  const rs = groupRanges(state.groups);
-  const gi = rs.findIndex(r=>i>=r.start && i<r.start+r.count);
-  const pos = i+1;
-  const perm = {};
-  for(let k=pos;k<state.layers.length;k++) perm[k]=k+1;
-  const L = state.layers[i];
-  state.layers.splice(pos, 0, {name:L.name, displayName:null, bindings:[...L.bindings], sensor:L.sensor, shiftLayer:!!L.shiftLayer});
-  state.groups[gi].count++;
-  remapAllRefs(perm);
-  activeLayer = pos;
+  activeLayer = copyLayerAt(state, i);
   renderAll();
 }
 function deleteLayer(i){
@@ -3645,16 +4272,10 @@ function deleteLayer(i){
   if(refs.length) msg += `\n\n⚠ このレイヤーへの参照が ${refs.length} 件あります(削除後は fw0 に付け替えます):\n・`+refs.slice(0,8).join('\n・')+(refs.length>8?'\n…':'');
   if(state.groups[gi].count<=1) msg += '\n\nグループ「'+state.groups[gi].name+'」も空になるため削除されます。';
   if(!confirm(msg)) return;
-  const perm = {}; perm[i]=0;
-  for(let k=i+1;k<state.layers.length;k++) perm[k]=k-1;
-  state.layers.splice(i,1);
-  state.groups[gi].count--;
-  remapAllRefs(perm);
-  if(state.groups[gi].count===0) state.groups.splice(gi,1);
-  // コンボ対象・条件レイヤーの重複を整理
-  state.combos.forEach(c=>{ if(c.layers) c.layers=[...new Set(c.layers)].sort((a,b)=>a-b); });
-  (state.condLayers||[]).forEach(c=>{ c.ifLayers=[...new Set(c.ifLayers)].sort((a,b)=>a-b); });
-  activeLayer = perm[activeLayer]!==undefined? perm[activeLayer] : Math.min(activeLayer, state.layers.length-1);
+  const r = deleteLayerAt(state, i);
+  if(!r) return;
+  activeLayer = r.perm[activeLayer]!==undefined? r.perm[activeLayer]
+    : Math.min(activeLayer, state.layers.length-1);
   renderAll();
 }
 function moveLayerToEndOf(from, gi){
@@ -3663,135 +4284,96 @@ function moveLayerToEndOf(from, gi){
   const end = rs[gi].start + rs[gi].count;
   if(fromGi===gi && from===end-1) return;
   if(fromGi!==gi && state.groups[fromGi].count<=1 && !confirm('グループ「'+state.groups[fromGi].name+'」が空になるため削除されます。続行しますか?')) return;
-  const n = state.layers.length;
-  const order = [...Array(n).keys()];
-  order.splice(from,1);
-  let ins = end;
-  if(from<end) ins--;
-  order.splice(ins,0,from);
-  state.groups[fromGi].count--;
-  state.groups[gi].count++;
-  applyOrder(order);
-  if(state.groups[fromGi].count===0) state.groups.splice(fromGi,1);
-  activeLayer = ins;
+  const r = moveLayerAt(state, from, end, gi);
+  if(r && r.perm[activeLayer]!==undefined) activeLayer = r.perm[activeLayer];
   renderAll();
 }
 function addLayerToGroup(gi){
-  const rs = groupRanges(state.groups);
-  const r = rs[gi];
-  const pos = r.start + r.count;
-  const n = state.layers[0]? state.layers[0].bindings.length : NUM_KEYS;
-  const perm = {};
-  for(let i=pos;i<state.layers.length;i++) perm[i] = i+1;
-  state.layers.splice(pos, 0, {name:'layer', displayName:null, bindings:Array(n).fill('&trans'), sensor:null, shiftLayer:false});
-  state.groups[gi].count++;
-  remapAllRefs(perm);
-  activeLayer = pos;
+  activeLayer = addLayerAt(state, gi);
   renderAll();
 }
 function addGroupFlow(){
-  const nn = prompt('新しい環境の名前(半角英字)\n例: MAC / IPAD / LINUX\n共有レイヤーにする場合は SHARED と入力してください:', 'MAC');
-  if(!nn) return;
-  const name = nn.replace(/[^A-Za-z]/g,'').toUpperCase();
-  if(!name){ alert('半角英字で入力してください'); return; }
-  if(state.groups.some(g=>g.name===name)){ alert('同名のグループがあります'); return; }
-  const n = state.layers[0]? state.layers[0].bindings.length : NUM_KEYS;
-  state.layers.push({name:'layer', displayName:null, bindings:Array(n).fill('&trans'), sensor:null, shiftLayer:false});
-  state.groups.push({name, count:1});
-  renderAll();
+  const rs = groupRanges(state.groups||[]);
+  const loc = document.getElementById('ae-loc'), os = document.getElementById('ae-os');
+  fillLocaleSelect(loc, null);
+  fillOsSelect(os, null);
+  const src = document.getElementById('ae-src');
+  src.innerHTML = rs.map((r,gi)=>`<option value="${gi}">${esc(r.name)}（${r.count}レイヤー）</option>`).join('');
+  const cur = groupIndexOfLayer(activeLayer);
+  if(cur>=0) src.value = String(cur);
+  const copy = document.getElementById('ae-copy');
+  copy.checked = rs.length>0; copy.disabled = rs.length===0;
+  const showRow = ()=>{ document.getElementById('ae-copyrow').style.display = copy.checked? '' : 'none'; };
+  copy.onchange = showRow; showRow();
+  document.getElementById('ae-name').value = '';
+  document.getElementById('ae-msg').textContent = '';
+  document.getElementById('addenv-bg').classList.add('open');
+  setTimeout(()=>document.getElementById('ae-name').focus(), 50);
 }
-function sanitizeName(s){ return s.replace(/[^\w]/g,'_'); }
+document.getElementById('ae-cancel').onclick = ()=>closeModal('addenv-bg');
+document.getElementById('ae-create').onclick = ()=>{
+  const msgEl = document.getElementById('ae-msg');
+  const name = document.getElementById('ae-name').value.replace(/[^A-Za-z]/g,'').toUpperCase();
+  if(!name){ msgEl.textContent = '名前を半角英字で入力してください'; return; }
+  if(state.groups.some(g=>g.name===name)){ msgEl.textContent = '同じ名前があります'; return; }
+  const locale = document.getElementById('ae-loc').value || null;
+  const platform = document.getElementById('ae-os').value || null;
+  const doCopy = document.getElementById('ae-copy').checked && state.groups.length>0;
+  const warnEl = document.getElementById('warnings');
 
-/* ----- JIS conversion ----- */
-let pendingConv = null;
-document.getElementById('btn-jis').onclick = ()=>{
-  if(!buildJisMaps(state.groups)){ alert('USグループとJISグループの両方が必要です'); return; }
-  openConvDialog(groupOf(activeLayer)==='JIS' ? 'jis2us' : 'us2jis');
-};
-function computeConvDiffs(direction){
-  const us2jis = direction==='us2jis';
-  const maps = buildJisMaps(state.groups);
-  if(!maps) return {pairs:[], diffs:[]};
-  const pairs = maps.order.map(s=> us2jis? [s, maps.fwd[s]] : [maps.fwd[s], s]);
-  const diffs=[];
-  for(const [s,d] of pairs){
-    const L=state.layers[s], D=state.layers[d];
-    if(!L||!D) continue;
-    L.bindings.forEach((b,i)=>{
-      const r = us2jis? convBinding(b, maps.fwd, !!L.shiftLayer) : convBindingUs(b, maps.rev);
-      if(normBinding(r.raw)!==normBinding(D.bindings[i])) diffs.push({s, d, pos:i, src:b, before:D.bindings[i], after:r.raw, warns:r.warns||[]});
-    });
-  }
-  return {pairs, diffs};
-}
-function convDiffCount(direction){
-  if(!state || !state.groups || !buildJisMaps(state.groups)) return 0;
-  return computeConvDiffs(direction).diffs.length;
-}
-function openConvDialog(direction){
-  const us2jis = direction==='us2jis';
-  const {pairs, diffs} = computeConvDiffs(direction);
-  pendingConv = {direction, pairs, diffs};
-  if(!diffs.length){
-    pendingConv = null;
-    document.getElementById('warnings').innerHTML = '<div class="warnbox">'+esc((us2jis?'US→JIS':'JIS→US')+': 変換が必要な差異はありません。')+'</div>';
+  if(!doCopy){
+    const n = state.layers[0]? state.layers[0].bindings.length : NUM_KEYS;
+    state.layers.push({name:'layer', displayName:null, bindings:Array(n).fill('&trans'), sensor:null, shiftLayer:false});
+    state.groups.push({name, count:1, locale, platform});
+    closeModal('addenv-bg'); renderAll();
+    warnEl.innerHTML = '<div class="warnbox">'+esc(
+      `✅ 「${name}」を追加しました。レイヤーを増やして配置してください。`)+'</div>';
     return;
   }
-  const list = document.getElementById('conv-list');
-  list.innerHTML='';
-  document.getElementById('conv-title').textContent = us2jis? 'US→JIS変換の確認' : 'JIS→US変換の確認';
-  document.getElementById('conv-sub').textContent = '変換先と入力結果が異なるキーの一覧です('+diffs.length+'件)。変換するキーにチェックしてください。';
-  let curLayer = -1;
-  const dl = us2jis?'jis':'us';
-  diffs.forEach((df,n)=>{
-    if(df.s!==curLayer){
-      curLayer = df.s;
-      const h=document.createElement('div'); h.className='catlabel';
-      h.textContent = `${gname(df.s)} ${state.layers[df.s].name} (fw${df.s}) → ${gname(df.d)} ${state.layers[df.d].name} (fw${df.d})`;
-      list.appendChild(h);
-    }
-    const row=document.createElement('label'); row.className='listrow'; row.style.cursor='pointer';
-    const cb=document.createElement('input'); cb.type='checkbox'; cb.checked=true; cb.dataset.n=n;
-    row.appendChild(cb);
-    const sp=document.createElement('span');
-    sp.innerHTML = `<span class="dimtxt">pos ${df.pos}</span> <b>${esc(faceText(df.before, dl))}</b> <code style="font-size:10px">${esc(df.before)}</code> <span class="dimtxt">→</span> <b>${esc(faceText(df.after, dl))}</b> <code style="font-size:10px">${esc(df.after)}</code>` +
-      (/^&jis_/.test(df.after)? ' <span style="color:var(--morph);font-size:11px">⚡ mod-morph生成</span>':'');
-    row.appendChild(sp);
-    list.appendChild(row);
-  });
-  document.getElementById('conv-bg').classList.add('open');
-}
-function applyConversion(){
-  if(!pendingConv) return;
-  const {direction, pairs, diffs} = pendingConv;
-  const us2jis = direction==='us2jis';
-  const checkedSet = new Set([...document.querySelectorAll('#conv-list input[type=checkbox]')].filter(c=>c.checked).map(c=>Number(c.dataset.n)));
-  let converted=0, skipped=0; const warns=[];
-  for(const [s,d] of pairs){
-    const D = state.layers[d];
-    D.bindings = D.bindings.map((b,i)=>{
-      const di = diffs.findIndex(x=>x.s===s && x.pos===i);
-      if(di<0) return b;
-      if(checkedSet.has(di)){ converted++; warns.push(...diffs[di].warns); return diffs[di].after; }
-      skipped++; return b;
+
+  const gi = Number(document.getElementById('ae-src').value);
+  const s = groupRanges(state.groups)[gi];
+  const srcName = state.groups[gi].name;
+  const srcLoc = groupLocale(gi), srcOs = groupPlatform(gi);
+  const offsetMap = buildEnvOffsetMap(s, {start:state.layers.length, count:s.count});
+  const morphs = {}, warnSet = new Set(), usedMorphs = new Set();
+  for(let k=0;k<s.count;k++){
+    const S = state.layers[s.start+k];
+    const bindings = S.bindings.map(b=>{
+      const r = convBindingFull(b, srcLoc, locale, srcOs, platform, !!S.shiftLayer,
+        (nm,m)=>{ morphs[nm]=m; }, offsetMap);
+      r.warns.forEach(w=>warnSet.add(w));
+      if(r.raw.startsWith('&loc_')) usedMorphs.add(r.raw.slice(1));
+      return r.raw;
     });
-    D.shiftLayer = !!state.layers[s].shiftLayer;
+    state.layers.push({name:S.name, displayName:null, bindings, sensor:S.sensor, shiftLayer:!!S.shiftLayer});
   }
-  registerJisMorphs();
-  pruneJisMorphs();
-  closeModal('conv-bg');
-  pendingConv = null;
-  renderAll();
-  let msg = `✅ ${us2jis?'US→JIS':'JIS→US'}変換を実行しました: 変換 ${converted} キー`+(skipped? ` / チェックなし(未変換) ${skipped} キー`:'');
-  if(us2jis){
-    const autoM = state.behaviors.morphs.filter(m=>isAutoJis(m)).map(m=>m.name);
-    if(autoM.length) msg += ` / mod-morph: ${autoM.join(', ')}`;
+  state.groups.push({name, count:s.count, locale, platform});
+  usedMorphs.forEach(nm=>{
+    const m = morphs[nm];
+    if(m && !state.behaviors.morphs.some(x=>x.name===nm)){
+      state.behaviors.morphs.push({name:nm, b1:m.u, b2:m.s, mods:['MOD_LSFT','MOD_RSFT'], keepMods:[]});
+    }
+  });
+  closeModal('addenv-bg'); renderAll();
+
+  const locName = id=>id? ((LOCALE_LIST.find(l=>l.id===id)||{}).name||id) : '設定なし';
+  let msg = `✅ 「${name}」を追加しました（${srcName} から ${s.count} レイヤーをコピー）。`;
+  if(srcLoc && locale && srcLoc!==locale) msg += ` 配列: ${locName(srcLoc)} → ${locName(locale)}。`;
+  if(srcOs && platform && srcOs!==platform) msg += ` OS: ${srcOs} → ${platform}。`;
+  if(usedMorphs.size) msg += ` mod-morph ${usedMorphs.size}件を追加しました。`;
+  if(!srcLoc || !locale || srcLoc===locale){
+    if(!srcOs || !platform || srcOs===platform)
+      msg += ' 配列・OSの差がないため、配置はそのまま複製しました。';
   }
-  if(warns.length) msg += '\n⚠ '+[...new Set(warns)].join('\n⚠ ');
-  document.getElementById('warnings').innerHTML = '<div class="warnbox">'+esc(msg)+'</div>';
-}
-document.getElementById('conv-exec').onclick = ()=>applyConversion();
-document.getElementById('conv-cancel').onclick = ()=>{ pendingConv=null; closeModal('conv-bg'); };
+  msg += '\n実機で切り替えるには「⇥ 切り替えキーを配置」を使ってください。';
+  if(warnSet.size) msg += '\n⚠ '+[...warnSet].slice(0,4).join(' / ');
+  if(typeof findShadowedRefs === 'function' && findShadowedRefs(state.groups, state.layers).length)
+    msg += '\n⚠ 前のレイヤーを呼び出している箇所があります。「⇅ レイヤー順序」で確認してください。';
+  warnEl.innerHTML = '<div class="warnbox">'+esc(msg)+'</div>';
+};
+
+function sanitizeName(s){ return s.replace(/[^\w]/g,'_'); }
 
 /* ----- import / export / preview ----- */
 document.getElementById('btn-import').onclick = ()=>document.getElementById('file-input').click();
@@ -3812,8 +4394,7 @@ function restoreBackup(text){
   try{
     const o = JSON.parse(text);
     if(!o.layers || !o.originalText) throw new Error('形式が不正です');
-    state = {originalText:o.originalText, layers:o.layers, groups:o.groups, keyboard:o.keyboard, combos:o.combos,
-      behaviors:o.behaviors, trackball:o.trackball, conf:o.conf, holdtap:o.holdtap, macros:o.macros, condLayers:o.condLayers};
+    state = pickState(o);
     upgradeState();
     if(state.keyboard) setKeyboard(state.keyboard);
     activeLayer = Math.min(o.activeLayer||0, state.layers.length-1);
@@ -3823,9 +4404,8 @@ function restoreBackup(text){
   }catch(e){ alert('バックアップファイルを読み込めませんでした: '+e.message); }
 }
 document.getElementById('btn-backup').onclick = ()=>{
-  const payload = {app:'zero-mess-keymapper', version:APP_VERSION, date:new Date().toISOString(),
-    originalText:state.originalText, layers:state.layers, groups:state.groups, combos:state.combos,
-    behaviors:state.behaviors, trackball:state.trackball, conf:state.conf, holdtap:state.holdtap, macros:state.macros, condLayers:state.condLayers, keyboard:state.keyboard, activeLayer};
+  const payload = Object.assign({app:'zero-mess-keymapper', version:APP_VERSION, date:new Date().toISOString()},
+    pickState(state), {activeLayer});
   const blob = new Blob([JSON.stringify(payload, null, 1)], {type:'application/json'});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
@@ -3833,90 +4413,8 @@ document.getElementById('btn-backup').onclick = ()=>{
   a.click();
   URL.revokeObjectURL(a.href);
 };
-/* ----- 整合性チェック ----- */
-function runValidation(){
-  const issues=[];
-  const n = state.layers.length;
-  const layerRef = b=>{
-    const t=b.trim().split(/\s+/);
-    if(['&mo','&to','&tog','&sl','&lt','&lt_to_layer_0'].includes(t[0]) && t[1]!==undefined) return [Number(t[1])];
-    return [];
-  };
-  const knownBeh = new Set(['kp','mt','lt','mo','to','tog','sl','trans','none','mkp','msc','bt','out','rgb_ug',
-    'bootloader','sys_reset','caps_word','key_repeat','sk','mmv','inc_dec_kp','lt_to_layer_0','to_layer_0']);
-  state.behaviors.morphs.forEach(m=>knownBeh.add(m.name));
-  state.behaviors.tds.forEach(t=>knownBeh.add(t.name));
-  state.behaviors.raws.forEach(r=>knownBeh.add(r.name));
-  (state.behaviors.hts||[]).forEach(h=>knownBeh.add(h.name));
-  if(state.macros){ state.macros.items.forEach(m=>knownBeh.add(m.name)); state.macros.raws.forEach(r=>knownBeh.add(r.name)); }
-  for(const k in JIS_MORPHS) knownBeh.add(JIS_MORPHS[k].name);
-  state.layers.forEach((L,li)=>{
-    L.bindings.forEach((b,ki)=>{
-      layerRef(b).forEach(x=>{ if(isNaN(x)||x<0||x>=n) issues.push(`${gname(li)} pos${ki}: 存在しないレイヤーへの参照 (${b})`); });
-      const nm = b.trim().slice(1).split(/\s+/)[0];
-      if(nm && !knownBeh.has(nm)) issues.push(`${gname(li)} pos${ki}: 未定義のビヘイビア &${nm}`);
-    });
-  });
-  const seen={};
-  state.combos.forEach(c=>{
-    const key=[...c.keyPositions].sort((a,b)=>a-b).join(',');
-    if(seen[key]) issues.push(`コンボ "${c.name}" と "${seen[key]}" のキー位置が重複しています`);
-    else seen[key]=c.name;
-    c.keyPositions.forEach(p=>{ if(p<0||p>=NUM_KEYS) issues.push(`コンボ "${c.name}": キー位置 ${p} は範囲外です`); });
-    (c.layers||[]).forEach(x=>{ if(x<0||x>=n) issues.push(`コンボ "${c.name}": 存在しないレイヤー ${x} を指定しています`); });
-    const nm = c.binding.trim().slice(1).split(/\s+/)[0];
-    if(nm && !knownBeh.has(nm)) issues.push(`コンボ "${c.name}": 未定義のビヘイビア &${nm}`);
-    layerRef(c.binding).forEach(x=>{ if(isNaN(x)||x<0||x>=n) issues.push(`コンボ "${c.name}": 存在しないレイヤーへの参照`); });
-  });
-  const tb = state.trackball;
-  if(tb){
-    if(tb.automouseLayer!==null && tb.automouseLayer!==undefined && (tb.automouseLayer<0||tb.automouseLayer>=n)) issues.push('トラックボール: オートマウスレイヤが範囲外です');
-    (tb.scrollLayers||[]).forEach(x=>{ if(x<0||x>=n) issues.push('トラックボール: スクロールレイヤー '+x+' が範囲外です'); });
-    (tb.snipeLayers||[]).forEach(x=>{ if(x<0||x>=n) issues.push('トラックボール: スナイプレイヤー '+x+' が範囲外です'); });
-  }
-  state.behaviors.morphs.forEach(m=>{ if(!m.b1||!m.b2) issues.push(`mod-morph "${m.name}": 動作が未設定です`); });
-  state.behaviors.tds.forEach(t=>{ if(t.bindings.length<2) issues.push(`tap-dance "${t.name}": タップ動作が2つ未満です`); });
-  if(state.macros) state.macros.items.forEach(m=>{
-    if(!m.steps.length) issues.push(`マクロ "${m.name}": ステップがありません`);
-    if(m.steps.some(s=>s.type!=='wait' && !s.binding)) issues.push(`マクロ "${m.name}": 未設定のステップがあります`);
-  });
-  // レイヤー順序の検査(ZMKの優先順位に起因する不具合)
-  findOrderIssues(state.groups||[]).forEach(x=>{
-    issues.push(`⚠ 共有レイヤー「${x.sharedName}」が ${x.blockedBy.join('・')} より前にあります。`
-      + `番号の大きいレイヤーが優先されるため、それらの環境に切り替えると共有レイヤーが効きません。`
-      + `「⇅ レイヤー順序を点検」で修正できます`);
-  });
-  findBaseTransIssues(state.groups||[], state.layers).forEach(x=>{
-    issues.push(`⚠ ${x.groupName} の最初のレイヤーに透過(▽)が ${x.positions.length} 箇所あります(pos ${x.positions.slice(0,6).join(',')}${x.positions.length>6?'…':''})。`
-      + `レイヤー0は常に有効なため、その位置だけ最初の環境の割り当てが出てしまいます`);
-  });
-
-  // 使用OSで無反応になるキーコードの検出
-  const osIssues = new Map();
-  const targets = (typeof osTargets!=='undefined' && osTargets.length)? osTargets : ['win','mac','linux'];
-  const scanOs = (b, where)=>{
-    findOsIssues(b, targets).forEach(x=>{
-      if(!osIssues.has(x.kc)) osIssues.set(x.kc, {x, n:0});
-      osIssues.get(x.kc).n++;
-    });
-  };
-  state.layers.forEach((L,li)=>L.bindings.forEach((b,ki)=>scanOs(b, gname(li)+' pos'+ki)));
-  state.combos.forEach(c=>scanOs(c.binding, 'Combo:'+c.name));
-  osIssues.forEach(v=>{
-    const names = v.x.bad.map(id=>(OS_LIST.find(o=>o.id===id)||{}).name).join('/');
-    issues.push(`⚠ ${v.x.kc} は ${names} では反応しません(${v.n}箇所)。`
-      + (v.x.alt? `${v.x.alt} への置き換えを推奨します — ` : '') + '「☰ メニュー → OS互換チェック」で確認できます');
-  });
-  (state.condLayers||[]).forEach(c=>{
-    c.ifLayers.forEach(x=>{ if(x<0||x>=n) issues.push(`条件付きレイヤー "${c.name}": 存在しないレイヤー ${x} を条件にしています`); });
-    if(c.thenLayer<0||c.thenLayer>=n) issues.push(`条件付きレイヤー "${c.name}": ONにするレイヤーが範囲外です`);
-    if(c.ifLayers.includes(c.thenLayer)) issues.push(`条件付きレイヤー "${c.name}": 条件とONにするレイヤーが同じです`);
-    if(c.ifLayers.length<2) issues.push(`条件付きレイヤー "${c.name}": 条件のレイヤーは2つ以上を推奨します`);
-  });
-  return [...new Set(issues)];
-}
 document.getElementById('btn-export').onclick = ()=>{
-  const issues = runValidation();
+  const issues = runValidation(state, osTargets);
   if(issues.length){
     document.getElementById('warnings').innerHTML = '<div class="warnbox">'+esc('⚠ 整合性チェック:\n・'+issues.join('\n・'))+'</div>';
     if(!confirm('問題が見つかりました:\n\n・'+issues.slice(0,10).join('\n・')+(issues.length>10?'\n…ほか'+(issues.length-10)+'件':'')+'\n\nこのまま書き出しますか?')) return;
@@ -3939,7 +4437,7 @@ function showExportGuide(fname){
   document.getElementById('export-bg').classList.add('open');
 }
 document.getElementById('btn-preview').onclick = ()=>{
-  const issues = runValidation();
+  const issues = runValidation(state, osTargets);
   if(issues.length) document.getElementById('warnings').innerHTML = '<div class="warnbox">'+esc('⚠ 整合性チェック:\n・'+issues.join('\n・'))+'</div>';
   document.getElementById('preview-text').value = generateKeymap(state);
   document.getElementById('preview-bg').classList.add('open');
@@ -3978,7 +4476,98 @@ function applyRenameCombo(oldName, newName){
   if(c) c.name = name;
   save(); renderCombos();
 }
+/** マクロ等が環境で別の入力になる場合に知らせ、その場で分割できるようにする */
+function renderBehEnvWarn(boxId, kind){
+  const box = document.getElementById(boxId);
+  if(!box) return;
+  box.innerHTML = '';
+  if(isSimpleMode()) return;
+  const issues = findBehaviorEnvIssues(state).filter(x=>x.kind===kind);
+  if(!issues.length) return;
+  const label = BEH_KIND_LABEL[kind] || kind;
+  const d = document.createElement('div');
+  d.className = 'warnbox';
+  d.style.marginBottom = '8px';
+  const head = document.createElement('div');
+  head.innerHTML = `この${esc(label)}は<b>複数の環境から呼ばれています</b>が、環境によって別の入力になります（${issues.length}件）。`
+    + `環境ごとに分けると、それぞれで同じ文字が出るようになります。`;
+  d.appendChild(head);
+  issues.forEach(x=>{
+    const li = document.createElement('div');
+    li.style.margin = '4px 0 0';
+    const face = (arr, loc)=>arr.map(b=>esc(faceText(b, loc||'us'))).join(' / ');
+    li.innerHTML = `<code style="font-size:10px">${esc(x.name)}</code> `
+      + `<span class="dimtxt">${esc(x.baseName)}</span> <b>${face(x.bindings, localeOfGroup(state.groups, x.base))}</b>`
+      + x.diffs.map(dd=>` <span class="dimtxt">→ ${esc(dd.name)}</span> <b>${face(dd.bindings, localeOfGroup(state.groups, dd.gi))}</b>`).join('');
+    d.appendChild(li);
+  });
+  const act = document.createElement('div');
+  act.style.marginTop = '6px';
+  const btn = document.createElement('button');
+  btn.className = 'primary';
+  btn.textContent = '環境ごとに分ける';
+  btn.title = '環境の数だけ定義を複製し、その環境のレイヤーの参照先も差し替えます';
+  btn.onclick = ()=>{
+    const list = findBehaviorEnvIssues(state).filter(x=>x.kind===kind);
+    let made = [];
+    list.slice().reverse().forEach(x=>{ made = made.concat(splitBehaviorForEnvs(state, x)); });
+    renderAll(); renderBehs(); renderMacros();
+    document.getElementById('warnings').innerHTML = '<div class="warnbox">'
+      + esc(`✅ ${label} ${list.length} 件を環境ごとに分けました（${made.join(', ')} を追加し、参照先も差し替えました）。`)+'</div>';
+  };
+  act.appendChild(btn);
+  d.appendChild(act);
+  box.appendChild(d);
+}
+function renderComboEnvWarn(){
+  const box = document.getElementById('combo-envwarn');
+  if(!box) return;
+  box.innerHTML = '';
+  if(isSimpleMode()) return;
+  const issues = findComboEnvIssues(state.groups||[], state.combos||[]);
+  if(!issues.length) return;
+  const d = document.createElement('div');
+  d.className = 'warnbox';
+  d.style.marginBottom = '8px';
+  const head = document.createElement('div');
+  head.innerHTML = `コンボは<b>全レイヤーで動く</b>ため、環境をまたぐと別の入力になるものがあります（${issues.length}件）。`
+    + `環境ごとに分けると、それぞれで同じ文字が出るようになります。`;
+  d.appendChild(head);
+  issues.forEach(x=>{
+    const li = document.createElement('div');
+    li.style.margin = '4px 0 0';
+    li.innerHTML = `<code style="font-size:10px">${esc(x.name)}</code> `
+      + `<span class="dimtxt">${esc(x.baseName)}</span> <b>${esc(faceText(x.binding, localeOfGroup(state.groups, x.base)||'us'))}</b>`
+      + x.diffs.map(dd=>` <span class="dimtxt">→ ${esc(dd.name)}</span> <b>${esc(faceText(dd.binding, localeOfGroup(state.groups, dd.gi)||'us'))}</b>`).join('');
+    d.appendChild(li);
+  });
+  const act = document.createElement('div');
+  act.style.marginTop = '6px';
+  const btn = document.createElement('button');
+  btn.className = 'primary';
+  btn.textContent = '環境ごとに分ける';
+  btn.title = 'コンボを環境の数だけ複製し、それぞれに layers 指定と変換後の動作を設定します';
+  btn.onclick = ()=>{
+    const list = findComboEnvIssues(state.groups||[], state.combos||[]);
+    if(!list.length) return;
+    let made = 0;
+    list.slice().reverse().forEach(x=>{
+      const parts = splitComboForEnvs(state.combos[x.ci], state.groups);
+      if(!parts) return;
+      state.combos.splice(x.ci, 1, ...parts);
+      made += parts.length;
+    });
+    cbEditIdx = -1;
+    renderAll(); renderCombos(); renderComboEnvWarn();
+    document.getElementById('warnings').innerHTML = '<div class="warnbox">'
+      + esc(`✅ コンボ ${list.length} 件を環境ごとに分けました（合計 ${made} 件になりました）。`)+'</div>';
+  };
+  act.appendChild(btn);
+  d.appendChild(act);
+  box.appendChild(d);
+}
 function renderCombos(){
+  renderComboEnvWarn();
   const el = document.getElementById('combo-list');
   el.innerHTML = state.combos.length? '' : '<div class="hint">コンボはまだありません。</div>';
   state.combos.forEach((c,i)=>{
@@ -4172,6 +4761,8 @@ function applyRenameBehavior(oldName, newName, isMorph){
   save(); renderBehs(); renderAll();
 }
 function renderBehs(){
+  renderBehEnvWarn('bm-envwarn', 'morph');
+  renderBehEnvWarn('td-envwarn', 'td');
   const ml=document.getElementById('bm-list');
   ml.innerHTML = state.behaviors.morphs.length? '' : '<div class="hint">mod-morphはまだありません。</div>';
   state.behaviors.morphs.forEach((m,i)=>{
@@ -4565,6 +5156,7 @@ function applyRenameMacro(oldName, newName){
   save(); renderMacros(); renderAll();
 }
 function renderMacros(){
+  renderBehEnvWarn('mc-envwarn', 'macro');
   const el = document.getElementById('mc-list');
   const items = state.macros.items;
   el.innerHTML = items.length? '' : '<div class="hint">マクロはまだありません。</div>';
@@ -4798,7 +5390,11 @@ function buildCheatSheet(){
   const S = 0.42;
   const groupSections = groupRanges(state.groups||[{name:'MAIN',count:state.layers.length}]).map((r,gi)=>{
     const boards = Array.from({length:r.count},(_,k)=> state.layers[r.start+k]? cheatBoard(r.start+k, S):'').join('');
-    return `<h2>${esc(r.name)}${isSharedGroup(state.groups[gi])?' <span style="font-size:12px;color:#888">(共有)</span>':''}</h2>`+boards;
+    const _loc = groupLocale(gi), _os = groupPlatform(gi);
+    const _meta = (!_loc && !_os)? '設定なし'
+      : [ _loc? ((LOCALE_LIST.find(l=>l.id===_loc)||{}).name||_loc) : null,
+          _os? (({win:'Windows',mac:'macOS',linux:'Linux'})[_os]||_os) : null ].filter(Boolean).join(' · ');
+    return `<h2>${esc(r.name)} <span style="font-size:12px;color:#888">${esc(_meta)}</span></h2>`+boards;
   }).join('');
   const comboRows = state.combos.map(c=>{
     const keys = c.keyPositions.map(p=>{ const b=state.layers[0]&&state.layers[0].bindings[p]; return b? String(uiLabel(b,'us').main) : p; }).join(' + ');
@@ -4885,12 +5481,13 @@ document.getElementById('btn-cheat').onclick = ()=>{
 /* ----- グループ間変換(配列規格 + OS) ----- */
 let platPending = null;
 function fillLocaleSelect(el, val){
-  el.innerHTML = LOCALE_LIST.map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('');
-  el.value = val;
+  el.innerHTML = '<option value="">設定なし</option>'
+    + LOCALE_LIST.map(l=>`<option value="${l.id}">${esc(l.name)}</option>`).join('');
+  el.value = val || '';
 }
 function fillOsSelect(el, val){
-  el.innerHTML = '<option value="">指定しない</option>' +
-    [['win','Windows'],['mac','macOS'],['linux','Linux']].map(([id,n])=>`<option value="${id}">${n}</option>`).join('');
+  el.innerHTML = '<option value="">設定なし</option>' +
+    OS_LIST.map(o=>`<option value="${o.id}">${esc(o.name)}</option>`).join('');
   el.value = val || '';
 }
 function platSyncFromGroups(){
@@ -4915,44 +5512,38 @@ document.getElementById('btn-platform').onclick = ()=>{
   platPending = null;
   document.getElementById('plat-bg').classList.add('open');
 };
-/** 1バインディングを 配列+OS の両方について変換 */
-function convBindingFull(raw, srcLoc, dstLoc, srcOs, dstOs, shiftMode, morphSink){
-  let cur = raw, warns = [], descs = [];
-  if(srcLoc!==dstLoc){
-    const r = convBindingLocale(cur, srcLoc, dstLoc, shiftMode, morphSink);
-    if(r.raw!==cur) descs.push('配列');
-    cur = r.raw; warns = warns.concat(r.warns);
-  }
-  if(srcOs && dstOs && srcOs!==dstOs){
-    const dir = (srcOs==='win' && dstOs==='mac')? 'win2mac' : (srcOs==='mac' && dstOs==='win')? 'mac2win' : null;
-    if(dir){
-      const r = convBindingPlatform(cur, dir);
-      if(r.raw!==cur){ cur = r.raw; descs.push(r.desc||'OS'); }
-    }
-  }
-  return {raw:cur, warns, desc:descs.join(' / ')};
-}
 document.getElementById('plat-scan').onclick = ()=>{
   const gi = Number(document.getElementById('plat-src').value);
   const gj = Number(document.getElementById('plat-dst').value);
-  const srcLoc = document.getElementById('plat-src-loc').value;
-  const dstLoc = document.getElementById('plat-dst-loc').value;
+  const srcLoc = document.getElementById('plat-src-loc').value || null;
+  const dstLoc = document.getElementById('plat-dst-loc').value || null;
   const srcOs = document.getElementById('plat-src-os').value || null;
   const dstOs = document.getElementById('plat-dst-os').value || null;
   const list = document.getElementById('plat-list');
   if(gi===gj){ list.innerHTML = '<div class="warnbox">変換元と変換先に同じグループが選ばれています。別のグループを選んでください。</div>'; return; }
-  if(srcLoc===dstLoc && (!srcOs || !dstOs || srcOs===dstOs)){
-    list.innerHTML = '<div class="warnbox">配列規格もOSも同じ設定です。どちらかを変えてください。</div>'; return;
+  const sameLoc = (!srcLoc || !dstLoc || srcLoc===dstLoc);
+  if(sameLoc && !platformDir(srcOs, dstOs)){
+    const famSame = srcOs && dstOs && srcOs!==dstOs && OS_FAMILY[srcOs]===OS_FAMILY[dstOs];
+    list.innerHTML = '<div class="warnbox">'
+      + (famSame
+        ? `${osName(srcOs)} と ${osName(dstOs)} はショートカットの体系が同じため、OSによる変換は不要です。`
+          + `キーコードの対応差は「OS互換チェック」で確認できます。`
+        : (!srcLoc || !dstLoc)
+        ? '配列が「設定なし」の側があります。配列を変換するには両側に配列を設定してください（レイヤーのコピーだけなら設定なしのままで構いません）。'
+        : '配列もOSも同じ設定です。どちらかを変えてください。')
+      + '</div>';
+    return;
   }
   const rs = groupRanges(state.groups);
   const s = rs[gi], d = rs[gj];
   const n = Math.min(s.count, d.count);
   if(n===0){ list.innerHTML = '<div class="warnbox">レイヤーがありません。</div>'; return; }
   const diffs = [], morphs = {}, warnSet = new Set();
+  const offsetMap = buildEnvOffsetMap(s, d);
   for(let k=0;k<n;k++){
     const S = state.layers[s.start+k], D = state.layers[d.start+k];
     S.bindings.forEach((b,ki)=>{
-      const r = convBindingFull(b, srcLoc, dstLoc, srcOs, dstOs, !!S.shiftLayer, (nm,m)=>{ morphs[nm]=m; });
+      const r = convBindingFull(b, srcLoc, dstLoc, srcOs, dstOs, !!S.shiftLayer, (nm,m)=>{ morphs[nm]=m; }, offsetMap);
       r.warns.forEach(w=>warnSet.add(w));
       if(r.raw!==D.bindings[ki]) diffs.push({si:s.start+k, di:d.start+k, ki, before:D.bindings[ki], after:r.raw, desc:r.desc});
     });
@@ -4974,7 +5565,7 @@ document.getElementById('plat-scan').onclick = ()=>{
   }
   const head = document.createElement('div');
   head.className = 'hint'; head.style.margin = '0 0 6px';
-  const locName = id=>(LOCALE_LIST.find(l=>l.id===id)||{}).name||id;
+  const locName = id=>id? ((LOCALE_LIST.find(l=>l.id===id)||{}).name||id) : '設定なし';
   head.textContent = `${state.groups[gi].name}(${locName(srcLoc)}${srcOs? ' / '+srcOs:''}) を元に `
     + `${state.groups[gj].name}(${locName(dstLoc)}${dstOs? ' / '+dstOs:''}) を更新します。`
     + `先頭から${n}レイヤー分、差異 ${diffs.length} 件。`;
@@ -5030,12 +5621,131 @@ document.getElementById('plat-exec').onclick = ()=>{
   platPending = null;
   closeModal('plat-bg');
   renderAll();
-  const locName = id=>(LOCALE_LIST.find(l=>l.id===id)||{}).name||id;
-  let msg = `✅ 変換を実行しました: ${done} キーを更新（${state.groups[gi].name} → ${state.groups[gj].name}）。`;
-  if(srcLoc!==dstLoc) msg += ` 配列: ${locName(srcLoc)} → ${locName(dstLoc)}。`;
+  const locName = id=>id? ((LOCALE_LIST.find(l=>l.id===id)||{}).name||id) : '設定なし';
+  let msg = `✅ 同期しました: ${done} キーを更新（${state.groups[gi].name} → ${state.groups[gj].name}）。`;
+  if(srcLoc && dstLoc && srcLoc!==dstLoc) msg += ` 配列: ${locName(srcLoc)} → ${locName(dstLoc)}。`;
   if(srcOs && dstOs && srcOs!==dstOs) msg += ` OS: ${srcOs} → ${dstOs}。`;
   if(usedMorphs.size) msg += ` mod-morph ${usedMorphs.size}件を追加しました。`;
   document.getElementById('warnings').innerHTML = '<div class="warnbox">'+esc(msg)+'</div>';
+};
+
+/* ----- 環境切り替えキーの配置 ----- */
+let swSel = {};        // 環境インデックス → キー位置
+let swPos = null;      // いま位置を選ぼうとしている環境
+function swEnvGroups(){
+  return groupRanges(state.groups||[]).map((r,gi)=>({r, gi}));
+}
+function renderSwAssign(){
+  const el = document.getElementById('sw-assign');
+  el.innerHTML = '';
+  const envs = swEnvGroups();
+  if(envs.length < 2){
+    el.innerHTML = '<div class="warnbox">'+esc('環境が1つだけのため、切り替えキーは必要ありません。複数の環境を作ると使えるようになります。')+'</div>';
+    return;
+  }
+  const useBt = document.getElementById('sw-bt').checked;
+  envs.forEach(({r, gi}, n)=>{
+    const d = document.createElement('div'); d.className='listrow'+(swPos===gi?' editing':'');
+    const nm = document.createElement('span'); nm.className='lname'; nm.textContent = r.name;
+    d.appendChild(nm);
+    const info = document.createElement('span');
+    const pos = swSel[gi];
+    info.innerHTML = (pos===undefined? '<span class="dimtxt">キー位置を選んでください</span>'
+                                     : `<b>pos ${pos}</b> <span class="dimtxt">に配置</span>`)
+      + (useBt? ` <span class="dimtxt">／ Bluetooth プロファイル ${n}</span>` : '');
+    d.appendChild(info);
+    const g = document.createElement('span'); g.className='grow'; d.appendChild(g);
+    const b = document.createElement('button');
+    b.textContent = (swPos===gi? '位置を選択中…' : '位置を指定');
+    b.onclick = ()=>{ swPos = (swPos===gi? null : gi); renderSwAssign(); renderSwBoard(); };
+    d.appendChild(b);
+    if(pos!==undefined){
+      const x = document.createElement('button'); x.textContent='✕'; x.className='danger';
+      x.onclick = ()=>{ delete swSel[gi]; renderSwAssign(); renderSwBoard(); };
+      d.appendChild(x);
+    }
+    el.appendChild(d);
+  });
+}
+function renderSwBoard(){
+  const bd = document.getElementById('sw-board');
+  bd.innerHTML = '';
+  const S = 0.30;
+  let maxX=0,maxY=0; PHYS.forEach(pp=>{maxX=Math.max(maxX,pp[2]+pp[0]);maxY=Math.max(maxY,pp[3]+pp[1]);});
+  bd.style.width=(maxX*S+10)+'px'; bd.style.height=(maxY*S+16)+'px';
+  const li = Number(document.getElementById('sw-layer').value);
+  const taken = {};
+  Object.keys(swSel).forEach(gi=>{ taken[swSel[gi]] = gi; });
+  PHYS.forEach((pp,i)=>{
+    const k = document.createElement('div');
+    k.className = 'mkey' + (taken[i]!==undefined? ' sel':'');
+    k.style.width=(pp[0]*S-2)+'px'; k.style.height=(pp[1]*S-2)+'px';
+    k.style.left=(pp[2]*S)+'px'; k.style.top=(pp[3]*S)+'px';
+    if(pp[4]){ k.style.transformOrigin=((pp[5]-pp[2])*S)+'px '+((pp[6]-pp[3])*S)+'px'; k.style.transform='rotate('+(pp[4]/100)+'deg)'; }
+    const cur = state.layers[li] && state.layers[li].bindings[i];
+    if(taken[i]!==undefined){
+      const gi = Number(taken[i]);
+      k.textContent = (state.groups[gi].name||'').slice(0,4);
+    } else {
+      k.textContent = cur? String(uiLabel(cur).main||'').slice(0,4) : i;
+    }
+    k.title = 'pos '+i + (cur? '（現在: '+cur+'）':'');
+    k.onclick = ()=>{
+      if(swPos===null){ document.getElementById('sw-msg').textContent = '先に「位置を指定」を押してください'; return; }
+      Object.keys(swSel).forEach(gi=>{ if(swSel[gi]===i) delete swSel[gi]; });
+      swSel[swPos] = i;
+      swPos = null;
+      document.getElementById('sw-msg').textContent = '';
+      renderSwAssign(); renderSwBoard();
+    };
+    bd.appendChild(k);
+  });
+}
+document.getElementById('btn-switcher').onclick = ()=>{
+  const sel = document.getElementById('sw-layer');
+  sel.innerHTML = state.layers.map((L,i)=>`<option value="${i}">${gname(i)} ${esc(L.name)}</option>`).join('');
+  sel.value = String(activeLayer);
+  sel.onchange = ()=>renderSwBoard();
+  document.getElementById('sw-bt').onchange = ()=>renderSwAssign();
+  swSel = {}; swPos = null;
+  document.getElementById('sw-msg').textContent = '';
+  renderSwAssign(); renderSwBoard();
+  document.getElementById('sw-bg').classList.add('open');
+};
+document.getElementById('sw-cancel').onclick = ()=>{ swSel={}; swPos=null; closeModal('sw-bg'); };
+document.getElementById('sw-apply').onclick = ()=>{
+  const envs = swEnvGroups();
+  const chosen = envs.filter(({gi})=>swSel[gi]!==undefined);
+  if(chosen.length < 2){
+    document.getElementById('sw-msg').textContent = '2つ以上の環境にキー位置を指定してください';
+    return;
+  }
+  const li = Number(document.getElementById('sw-layer').value);
+  const useBt = document.getElementById('sw-bt').checked;
+  const placed = [];
+  chosen.forEach(({r, gi}, n)=>{
+    const pos = swSel[gi];
+    let binding;
+    if(useBt){
+      // Bluetooth の切り替えとレイヤー移動をまとめたマクロを作る
+      const nm = ('env_'+r.name).toLowerCase().replace(/[^\w]/g,'_');
+      const steps = [{type:'tap', binding:'&bt BT_SEL '+n}, {type:'tap', binding:'&to '+r.start}];
+      const exist = state.macros.items.find(m=>m.name===nm);
+      if(exist) exist.steps = steps;
+      else state.macros.items.push({name:nm, tapMs:null, waitMs:null, steps});
+      binding = '&'+nm;
+    } else {
+      binding = '&to '+r.start;
+    }
+    state.layers[li].bindings[pos] = binding;
+    placed.push(`${r.name} → pos ${pos}`);
+  });
+  closeModal('sw-bg');
+  renderAll();
+  document.getElementById('warnings').innerHTML = '<div class="warnbox">'
+    + esc(`✅ ${gname(li)} ${state.layers[li].name} に環境切り替えキーを配置しました（${placed.join(' / ')}）。`
+      + (useBt? ' Bluetoothプロファイルの切り替えを含むマクロを作成しました。' : '')
+      + ' 電源を入れ直すと最初の環境に戻ります。')+'</div>';
 };
 
 /* ----- レイヤー順序の点検 ----- */
@@ -5044,18 +5754,27 @@ function renderOrderCheck(){
   const acts = document.getElementById('order-actions');
   list.innerHTML = '';
   acts.style.display = 'none';
-  const ord = findOrderIssues(state.groups||[]);
+  const sh = findShadowedRefs(state.groups||[], state.layers);
   const trs = findBaseTransIssues(state.groups||[], state.layers);
-  if(!ord.length && !trs.length){
-    list.innerHTML = '<div class="warnbox">'+esc('✅ 問題は見つかりませんでした。どの環境に切り替えても、共有レイヤーは正しく動作します。')+'</div>';
+  if(!sh.length && !trs.length){
+    list.innerHTML = '<div class="warnbox">'+esc('✅ 問題は見つかりませんでした。どの環境に切り替えても、呼び出したレイヤーは正しく動作します。')+'</div>';
     return;
   }
-  ord.forEach(x=>{
+  const grouped = new Map();
+  sh.forEach(x=>{
+    const k = x.groupName+'→'+x.target;
+    if(!grouped.has(k)) grouped.set(k, {x, places:[]});
+    grouped.get(k).places.push(gname(x.layerIndex)+' pos'+x.pos);
+  });
+  grouped.forEach(v=>{
     const d = document.createElement('div'); d.className='listrow';
+    const tName = state.layers[v.x.target]? state.layers[v.x.target].name : '';
     d.innerHTML = `<span class="lname" style="color:var(--danger)">要修正</span>`
-      + `<span>共有レイヤー <b>${esc(x.sharedName)}</b> が <b>${esc(x.blockedBy.join('・'))}</b> より前にあります。<br>`
-      + `<span class="dimtxt">これらの環境に切り替えると、番号の大きい環境レイヤーが優先されるため、`
-      + `共有レイヤー(マウスやBluetoothなど)を呼び出しても反応しません。</span></span>`;
+      + `<span><b>${esc(v.x.groupName)}</b> から <b>fw${v.x.target}${tName? ' ('+esc(tName)+')':''}</b> を呼び出していますが、`
+      + `このレイヤーは番号が小さいため<b>無視されます</b>。<br>`
+      + `<span class="dimtxt">${esc(v.x.groupName)} は fw${v.x.blockedBy} から始まります。`
+      + `ZMKでは番号の大きいレイヤーが優先されるため、fw${v.x.target} を呼び出しても手前のレイヤーに隠れてしまいます。<br>`
+      + `該当: ${esc(v.places.slice(0,6).join(' / '))}${v.places.length>6? ' ほか'+(v.places.length-6)+'箇所':''}</span></span>`;
     list.appendChild(d);
   });
   trs.forEach(x=>{
@@ -5067,7 +5786,7 @@ function renderOrderCheck(){
       + `意図した動作でなければ、キーを直接割り当ててください。</span></span>`;
     list.appendChild(d);
   });
-  if(ord.length) acts.style.display = '';
+  if(sh.length && orderToFixShadowing(state.groups||[], state.layers)) acts.style.display = '';
 }
 document.getElementById('btn-order').onclick = ()=>{
   renderOrderCheck();
@@ -5075,8 +5794,8 @@ document.getElementById('btn-order').onclick = ()=>{
 };
 document.getElementById('order-fix').onclick = ()=>{
   const before = state.groups.map(g=>g.name).join(' → ');
-  const perm = orderWithSharedLast(state.groups);
-  if(perm.every((o,i)=>o===i)){ renderOrderCheck(); return; }
+  const perm = orderToFixShadowing(state.groups||[], state.layers);
+  if(!perm){ renderOrderCheck(); return; }
   // グループを並べ替え、レイヤーもそれに合わせて移動する
   const rs = groupRanges(state.groups);
   const arr = perm.map(oldGi=>({g:state.groups[oldGi], idxs:Array.from({length:rs[oldGi].count},(_,x)=>rs[oldGi].start+x)}));
@@ -5293,7 +6012,7 @@ async function ghPutFile(path, text, shaHint, message){
 document.getElementById('gh-commit').onclick = async ()=>{
   const path = document.getElementById('gh-keymap').value;
   if(!path){ ghSay('keymapファイルを選択してください。', true); return; }
-  const issues = runValidation();
+  const issues = runValidation(state, osTargets);
   if(issues.length && !confirm('整合性チェックで問題が見つかりました:\n\n・'+issues.slice(0,8).join('\n・')+(issues.length>8?'\n…':'')+'\n\nこのままコミットしますか?')) return;
   const msg = document.getElementById('gh-msg').value.trim() || 'Update keymap via Zero Mess Keymapper';
   ghSay(''); ghStatus('コミット中…');

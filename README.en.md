@@ -35,9 +35,13 @@ environment = keyboard layout (the OS setting) × operating system
 
 For example "work PC = JIS × Windows", "home Mac = US × macOS", "iPad = US × iOS".
 
-You group layers by environment, design **one of them as the base**, and generate the rest with **environment sync**. On the keyboard itself you switch environments with a key on a shared layer, so **your fingers do the same thing on every machine**.
+You group layers by environment, design **one of them as the base**, and create the rest from **"+ Environment"** — pick a source and the converted layers appear straight away. After editing the base, **environment sync** brings the others back in line. On the keyboard itself a switch key moves between them, so **your fingers do the same thing on every machine**.
 
-Supported layouts are US (ANSI), JIS, UK (ISO), German (QWERTZ) and Dvorak; supported systems are Windows and macOS.
+Supported layouts are US (ANSI), JIS, UK (ISO), German (QWERTZ) and Dvorak; supported systems are Windows, macOS, Linux, iOS and Android.
+
+Shortcuts really only come in two families — Ctrl-based (Windows, Linux, Android) and Cmd-based (macOS, iPadOS) — so conversion happens between those two. Within a family (Windows to Linux, say) nothing is converted; the remaining keycode differences are handled by the OS compatibility check.
+
+**With a single environment none of this is shown** — it behaves as an ordinary keymap editor.
 
 ---
 
@@ -51,9 +55,12 @@ Supported layouts are US (ANSI), JIS, UK (ISO), German (QWERTZ) and Dvorak; supp
 
 **Layers by environment**
 
-- Organise layers into environments (layout × OS) and shared layers
+- Organise layers by environment (layout × OS); either setting may be left unset
 - Reorder and colour-code them; layer numbers and all references follow automatically
-- **Layer order check** — finds problems caused by ZMK's layer priority rules and fixes them in one click
+- **One-step environment creation** — name, layout, OS and source in a single dialog; the converted layers are created for you
+- **Settings visible in the layer list** — each environment shows its layout and OS ("JIS × Windows"); click to change them in place
+- **Switch keys** — place the keys that move between environments, optionally switching the Bluetooth profile too
+- **Layer order check** — finds layers that would be ignored when called, and fixes the order in one click
 
 **ZMK features supported**
 
@@ -62,7 +69,8 @@ Combo / Mod-Morph / Tap-Dance / Macro / Conditional Layer / custom Hold-Tap (inc
 **Helpers**
 
 - Validation before export (references to missing layers, undefined behaviors)
-- **OS compatibility check** — finds keycodes your operating systems ignore (`K_MUTE` and friends) and replaces them with working alternatives. Covers Windows, macOS, Linux, iOS and Android
+- **OS compatibility check** — finds keycodes your operating systems ignore (`K_MUTE`, the Japanese IME keys, and so on) and replaces them with working alternatives. Covers Windows, macOS, Linux, iOS and Android
+- **Per-environment combos, macros and tap-dances** — these are shared across environments, so one that types a symbol produces the wrong character under a different layout. The editor finds them and splits them per environment, rewriting the layers that referenced them
 - Full backup and restore as a single JSON file
 - Printable cheat sheet
 - Key tester, dark/light theme, Japanese/English interface
@@ -139,17 +147,21 @@ Recent versions of Chrome, Edge, Firefox or Safari. Your work is saved automatic
 A single HTML file with no external dependencies.
 
 ```
-index.html   the app (core layer = DOM-independent logic / UI layer)
-tests.js     automated test suite
+index.html    the app (core layer = DOM-independent logic / UI layer)
+tests.js      automated test suite
+ui-tests.js   tests that actually drive the page (jsdom)
 ```
 
 Run the tests:
 
 ```bash
-node tests.js
+node tests.js            # 809 checks (85 of them driving the page)
+npm install jsdom        # needed for the page tests; skipped if absent
 ```
 
-The suite covers parse/generate round-trips, the correctness and reversibility of every conversion, the consistency of the OS compatibility table, and persistence of every feature — 165 checks in all. Run it after any change.
+`tests.js` checks the core layer and the HTML structure, then hands off to `ui-tests.js`, which loads the page and **clicks the actual buttons**.
+
+Among other things it covers parse/generate round-trips, the reversibility of every conversion across all five layouts and every key, state persistence (catching anything left out of undo history, browser storage or backups), reference fix-ups when layers are copied/deleted/moved, the OS compatibility table against the official docs, resilience to malformed files, and structural invariants for the UI (every referenced id exists, no duplicates). Run it after any change.
 
 An architecture overview is in the comment block at the top of `index.html`.
 
