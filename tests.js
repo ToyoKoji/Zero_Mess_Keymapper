@@ -33,10 +33,21 @@ delete require.cache[require.resolve(corePath)];
 const C = require(corePath);
 const ui = scripts[1][1];
 
+/* 実際の設定ファイルらしさ(7レイヤー・コンボ・マクロ・トラックボール)を
+   確かめるための見本。既定のキーマップは HHKB の素直な2レイヤーなので、
+   複雑な構造の検査にはこちらを使う。 */
+const samplePath = path.join(__dirname, 'sample-roba.keymap');
+const SAMPLE = fs.existsSync(samplePath) ? fs.readFileSync(samplePath, 'utf8') : null;
+if (!SAMPLE) console.log('  ※ sample-roba.keymap が無いため、一部の検査を省略します');
+
+
 /* ---------- 1. パースとラウンドトリップ ---------- */
 section('keymapパース/生成');
-const p = C.parseKeymap(C.DEFAULT_KEYMAP);
-t('7レイヤー×43キー', p.layers.length===7 && p.layers.every(l=>l.bindings.length===C.NUM_KEYS));
+const p = C.parseKeymap(SAMPLE || C.DEFAULT_KEYMAP);
+t('見本は7レイヤー×43キー', p.layers.length===7 && p.layers.every(l=>l.bindings.length===43),
+  p.layers.length+'×'+p.layers[0].bindings.length);
+t('既定は2レイヤー×60キー(HHKB)', (()=>{ const d=C.parseKeymap(C.DEFAULT_KEYMAP);
+  return d.layers.length===2 && d.layers.every(l=>l.bindings.length===C.NUM_KEYS); })(), String(C.NUM_KEYS));
 {
   const st = {originalText:C.DEFAULT_KEYMAP, layers:p.layers};
   const out = C.generateKeymap(st);
@@ -48,7 +59,7 @@ t('7レイヤー×43キー', p.layers.length===7 && p.layers.every(l=>l.bindings
 /* ---------- 2. グループとJIS変換 ---------- */
 section('グループ/JIS変換');
 {
-  const pp = C.parseKeymap(C.DEFAULT_KEYMAP);
+  const pp = C.parseKeymap(SAMPLE || C.DEFAULT_KEYMAP);
   pp.layers.forEach((l,i)=>l.shiftLayer=(i===0));
   const groups = [{name:'US',count:5},{name:'GEN',count:2}];
   const st = {originalText:C.DEFAULT_KEYMAP, layers:pp.layers, groups};
@@ -93,14 +104,14 @@ t('normBinding等価', C.normBinding('&kp NUMBER_7')===C.normBinding('&kp N7'));
 /* ---------- 4. 各機能ノードのラウンドトリップ ---------- */
 section('Combo/Behavior/Macro/CondLayer');
 {
-  const combos = C.parseCombos(C.DEFAULT_KEYMAP);
+  const combos = C.parseCombos(SAMPLE || C.DEFAULT_KEYMAP);
   t('combos 5件', combos.length===5);
-  const behs = C.parseBehaviors(C.DEFAULT_KEYMAP);
+  const behs = C.parseBehaviors(SAMPLE || C.DEFAULT_KEYMAP);
   t('morphs 0 / hts 1 / raws 0', behs.morphs.length===0 && behs.hts.length===1 && behs.raws.length===0);
   t('lt_to_layer_0構造化', behs.hts[0].name==='lt_to_layer_0' && behs.hts[0].holdBeh==='&mo');
-  const mac = C.parseMacros(C.DEFAULT_KEYMAP);
+  const mac = C.parseMacros(SAMPLE || C.DEFAULT_KEYMAP);
   t('to_layer_0はraw保持', mac.raws.length===1 && mac.items.length===0);
-  const st = {originalText:C.DEFAULT_KEYMAP, layers:C.parseKeymap(C.DEFAULT_KEYMAP).layers,
+  const st = {originalText:SAMPLE || C.DEFAULT_KEYMAP, layers:C.parseKeymap(SAMPLE || C.DEFAULT_KEYMAP).layers,
     combos, behaviors:behs, macros:mac,
     condLayers:[{name:'tri', ifLayers:[1,2], thenLayer:3}],
     trackball:{automouseLayer:6, scrollLayers:[5], snipeLayers:[]},
@@ -159,6 +170,254 @@ function evalUiFn(startMarker, endMarker, expr, extra){
 }
 
 /* ---------- 6.5 13-a: キーボード抽象化 ---------- */
+section('キーの大きさと位置');
+{
+  /* 1Uでないキーを持つキーボードを扱えるようにするための計算。
+     単位は 1U = 100。割り当てには一切触れない。 */
+  const base = () => [[100,100,0,0,0,0,0], [100,100,100,0,0,0,0],
+                      [100,100,200,0,0,0,0], [100,100,0,100,0,0,0]];
+
+  // 大きさを変える
+  {
+    const r = C.resizeKeyAt(base(), 0, 200, 100, false);
+    t('幅が変わる', r[0][0] === 200);
+    t('高さは据え置き', r[0][1] === 100);
+    t('他のキーは動かない', r[1][2] === 100);
+    t('元の配列を壊さない', base()[0][0] === 100);
+  }
+  {
+    const r = C.resizeKeyAt(base(), 0, 200, 100, true);
+    t('同じ行の後ろがずれる', r[1][2] === 200 && r[2][2] === 300,
+      r[1][2] + ',' + r[2][2]);
+    t('別の行はずれない', r[3][2] === 0);
+  }
+  {
+    const r = C.resizeKeyAt(base(), 1, 50, 100, true);
+    t('小さくすると後ろが左へ寄る', r[2][2] === 150, String(r[2][2]));
+  }
+  t('小さすぎる値は下限で止める', C.resizeKeyAt(base(), 0, 1, 1, false)[0][0] >= 25);
+  t('端数は丸める', C.resizeKeyAt(base(), 0, 137.6, 100, false)[0][0] === 138);
+  t('存在しないキーでも落ちない', C.resizeKeyAt(base(), 99, 200, 100, true).length === 4);
+
+  // 位置を変える
+  {
+    const r = C.moveKeyAt(base(), 2, 500, 300);
+    t('位置が変わる', r[2][2] === 500 && r[2][3] === 300);
+    t('負の位置にはしない', C.moveKeyAt(base(), 0, -50, -50)[0][2] === 0);
+    t('他のキーは動かない', r[0][2] === 0 && r[1][2] === 100);
+  }
+
+  // 行を詰め直す
+  {
+    const k = C.resizeKeyAt(base(), 0, 300, 100, false);   // 重なった状態
+    t('重なりを検出する', C.findKeyOverlaps(k).length > 0, String(C.findKeyOverlaps(k).length));
+    const packed = C.packRow(k, 0);
+    t('詰め直すと重なりが消える', C.findKeyOverlaps(packed).length === 0);
+    t('詰め直しても行の先頭位置は変わらない', packed[0][2] === 0);
+    t('詰め直しは同じ行だけ', packed[3][2] === 0 && packed[3][3] === 100);
+    t('詰め直しでキー数は変わらない', packed.length === k.length);
+  }
+  t('重なりがなければ空', C.findKeyOverlaps(base()).length === 0);
+  t('回転キーは重なり判定の対象外',
+    C.findKeyOverlaps([[100,100,0,0,1200,0,0], [100,100,0,0,0,0,0]]).length === 0);
+
+  // 内蔵プロファイルはどれも重なっていない
+  C.BUILTIN_PROFILES.forEach(p=>{
+    t('内蔵プロファイルに重なりがない: '+p.id, C.findKeyOverlaps(p.keys).length === 0,
+      JSON.stringify(C.findKeyOverlaps(p.keys).slice(0,3)));
+  });
+  // HHKB は 1U 以外のキーを持つ(この機能が必要になる実例)
+  {
+    const hh = C.builtinProfile('hhkb');
+    const sizes = [...new Set(hh.keys.map(k=>k[0]))].sort((a,b)=>a-b);
+    t('HHKBに1U以外の幅がある', sizes.length > 1, sizes.map(v=>v/100+'U').join(','));
+    t('7Uのスペースがある', sizes.includes(700));
+  }
+
+  // 画面
+  t('編集画面がある', html.includes('id="kbedit-bg"'));
+  t('よく使う幅のボタンがある', (html.match(/class="modcheck kbe-preset"/g)||[]).length >= 8);
+  t('一覧から編集を開ける', ui.includes('be.onclick = ()=>openKbEditor(p)'));
+  t('内蔵は複製してから編集する', ui.includes("prof = {id, name:kbeTarget.name+' (編集)'"));
+  t('保存時に行を導き直す', ui.includes('rows:deriveRows(kbeKeys)'));
+  t('ヘルプに記載がある', html.includes('<b>「形を編集」</b>'));
+}
+
+section('レイアウトの取り込み');
+{
+  /* 1つのファイルに複数の配列(6列/5列など)が入っていることがあるので、
+     ファイル単位ではなくレイアウト定義単位で拾えること。 */
+  const two = `
+/ {
+    foo_6col: foo_6col {
+        compatible = "zmk,physical-layout";
+        display-name = "6 Column";
+        keys = <&key_physical_attrs 100 100 0 0 0 0 0>
+             , <&key_physical_attrs 100 100 100 0 0 0 0>
+             , <&key_physical_attrs 100 100 200 0 0 0 0>;
+    };
+    foo_5col: foo_5col {
+        compatible = "zmk,physical-layout";
+        display-name = "5 Column";
+        keys = <&key_physical_attrs 100 100 0 0 0 0 0>
+             , <&key_physical_attrs 100 100 100 0 0 0 0>;
+    };
+};`;
+  const L = C.parsePhysicalLayouts(two);
+  t('1ファイルから複数の配列を拾える', L.length === 2, String(L.length));
+  t('表示名を取れる', L.map(x=>x.name).join(',') === '6 Column,5 Column', L.map(x=>x.name).join(','));
+  t('ノード名も取れる', L[0].node === 'foo_6col', L[0].node);
+  t('キー数が合う', L[0].keyCount === 3 && L[1].keyCount === 2);
+  t('座標が7項目', L[0].keys.every(k=>k.length === 7));
+
+  // 内蔵プロファイルと同じ定義から、同じ結果が得られること
+  {
+    const hh = C.builtinProfile('hhkb');
+    const src = '/ { x: x { compatible = "zmk,physical-layout"; display-name = "HHKB";\n keys = '
+      + hh.keys.map(k=>'<&key_physical_attrs '+k.join(' ')+'>').join(', ') + ';\n };\n};';
+    const got = C.parsePhysicalLayouts(src);
+    t('内蔵と同じ座標を取り出せる', got.length === 1
+      && JSON.stringify(got[0].keys) === JSON.stringify(hh.keys), got.length? got[0].keyCount : 'なし');
+  }
+
+  t('定義が無ければ空', C.parsePhysicalLayouts('/ { a: a { foo = <1>; }; };').length === 0);
+  t('壊れた入力でも落ちない', (()=>{ try{ C.parsePhysicalLayouts('{{{'); C.parsePhysicalLayouts(''); return true; }catch(e){ return false; } })());
+  // ノードの体裁が違っても、ファイル全体から拾えること
+  t('体裁が違っても拾える',
+    C.parsePhysicalLayouts('keys = <&key_physical_attrs 100 100 0 0 0 0 0>;').length === 1);
+
+  // 取得前のふるい分け
+  t('レイアウト定義らしい拡張子だけ見る',
+    C.looksLikeLayoutFile('a/b.dtsi') && C.looksLikeLayoutFile('c.overlay')
+    && C.looksLikeLayoutFile('d.keymap') && !C.looksLikeLayoutFile('e.txt')
+    && !C.looksLikeLayoutFile('f.md'));
+  t('ビルド成果物は見ない',
+    !C.looksLikeLayoutFile('build/x.dtsi') && !C.looksLikeLayoutFile('app/build/y.dtsi'));
+  t('レイアウトらしい場所から先に見る',
+    C.layoutScanOrder(['z.dtsi','app/boards/x.dtsi','a-layouts.dtsi'])[0] === 'a-layouts.dtsi',
+    C.layoutScanOrder(['z.dtsi','app/boards/x.dtsi','a-layouts.dtsi']).join(','));
+  t('並べ替えは元の配列を壊さない', (()=>{
+    const a = ['z.dtsi','a-layouts.dtsi']; C.layoutScanOrder(a); return a[0] === 'z.dtsi';
+  })());
+  t('同じ結果が安定して返る',
+    JSON.stringify(C.layoutScanOrder(['b.dtsi','a.dtsi'])) === JSON.stringify(C.layoutScanOrder(['a.dtsi','b.dtsi'])));
+
+  // 画面
+  t('リポジトリの入力欄がある', html.includes('id="kb-repo"'));
+  t('既定はZMK公式', html.includes('value="zmkfirmware/zmk"'));
+  t('結果の置き場所がある', html.includes('id="kb-repo-result"'));
+  t('中身はraw配信から取る', ui.includes('raw.githubusercontent.com'));
+  // 取れたらそれを使う(APIの回数を消費しない)ことまで確かめる
+  t('rawで取れたらAPIを使わない', /if\(r\.ok\)\s*return await r\.text\(\);/.test(ui));
+  t('取れない場合はAPIに切り替える', /ghFileText[\s\S]{0,600}ghFetch\(`\/repos\//.test(ui));
+  t('一覧(tree)はAPIを1回だけ使う', (ui.match(/git\/trees\//g)||[]).length <= 2);
+  t('同じ名前のものはまとめる', ui.includes("const key = L.name+'/'+L.keyCount;"));
+  t('ヘルプに記載がある', html.includes('<b>「レイアウトを探す」</b>'));
+}
+
+section('内蔵キーボード');
+{
+  /* 物理レイアウトはZMK公式の定義を取り込んだもの。座標が1つでもずれると
+     盤面の並びが実機と食い違い、配置を設計できなくなる。 */
+  const P = C.BUILTIN_PROFILES;
+  t('内蔵プロファイルがある', Array.isArray(P) && P.length >= 8, String(P.length));
+  t('既定のHHKBが先頭', P[0].id === 'hhkb', P[0].id);
+  t('roBaも残っている', P.some(p=>p.id==='roba'));
+  t('idが重複しない', new Set(P.map(p=>p.id)).size === P.length,
+    P.map(p=>p.id).join(','));
+  t('名前が重複しない', new Set(P.map(p=>p.name)).size === P.length);
+
+  const want = {hhkb:60, roba:43, corne6:42, corne5:36, lily58:58, sofle:60,
+                ortho4x12:48, ortho4x10:40, ortho5x12:60};
+  Object.entries(want).forEach(([id, n])=>{
+    const p = C.builtinProfile(id);
+    t('プロファイルがある: '+id, !!p);
+    if(!p) return;
+    t(`${id} は ${n} キー`, p.keyCount === n, String(p.keyCount));
+    t(`${id} のキー数と座標数が一致`, p.keys.length === p.keyCount,
+      `${p.keys.length} vs ${p.keyCount}`);
+  });
+  t('知らないidはnull', C.builtinProfile('nope') === null);
+
+  P.forEach(p=>{
+    t('座標が7項目の数値: '+p.id,
+      p.keys.every(k=>Array.isArray(k) && k.length === 7 && k.every(v=>typeof v === 'number' && isFinite(v))));
+    t('幅と高さが正: '+p.id, p.keys.every(k=>k[0] > 0 && k[1] > 0));
+    t('座標が負でない: '+p.id, p.keys.every(k=>k[2] >= 0 && k[3] >= 0));
+    t('キーが重なっていない: '+p.id, (()=>{
+      const seen = new Set();
+      return p.keys.every(k=>{ const key = k[2]+','+k[3]; if(seen.has(key)) return false; seen.add(key); return true; });
+    })());
+    /* rows は [開始位置, 左手の数, 行の合計] の並び。盤面の折り返しに使う。
+       roBa は親指の回転キーがあるため手で調整した値を持つので、
+       自動導出との一致ではなく「破綻していないこと」を確かめる。 */
+    t('行の指定がある: '+p.id, Array.isArray(p.rows) && p.rows.length > 0);
+    t('行の開始位置が昇順: '+p.id,
+      p.rows.every((r,i)=> i===0 ? r[0]===0 : r[0] > p.rows[i-1][0]),
+      JSON.stringify(p.rows));
+    t('行がキー数に収まる: '+p.id,
+      p.rows.every(r=> r[0] >= 0 && r[0] + r[2] <= p.keyCount && r[1] >= 0 && r[1] <= r[2]),
+      JSON.stringify(p.rows));
+    /* 行の中でYが大きく散らばっていたら、座標を取り違えている。
+       列スタッガと親指の回転を見込んでも実測の最大は87なので、150で線を引く。 */
+    p.rows.forEach((r, ri)=>{
+      const ys = p.keys.slice(r[0], r[0]+r[2]).map(k=>k[3]);
+      const spread = Math.max(...ys) - Math.min(...ys);
+      t(`行${ri}のYがまとまっている: ${p.id}`, spread <= 150, String(spread));
+    });
+    // 盤面が現実的な大きさに収まっているか(1u=100)
+    {
+      const w = Math.max(...p.keys.map(k=>k[2]+k[0]));
+      const hgt = Math.max(...p.keys.map(k=>k[3]+k[1]));
+      t('盤面の幅が現実的: '+p.id, w > 400 && w <= 2200, String(w));
+      t('盤面の高さが現実的: '+p.id, hgt > 200 && hgt <= 800, String(hgt));
+    }
+    t('行が全キーを覆う: '+p.id,
+      p.rows[p.rows.length-1][0] + p.rows[p.rows.length-1][2] === p.keyCount,
+      JSON.stringify(p.rows[p.rows.length-1]) + ' / ' + p.keyCount);
+    if(p.id !== 'roba')
+      t('自動で導く行と一致: '+p.id,
+        JSON.stringify(C.deriveRows(p.keys)) === JSON.stringify(p.rows),
+        JSON.stringify(C.deriveRows(p.keys)));
+  });
+
+  // 実際に切り替えて編集・書き出しができるか
+  const saved = C.getKeyboard();
+  P.forEach(p=>{
+    C.setKeyboard(p);
+    const km = C.makeEmptyKeymap(p.keyCount);
+    const st = C.parseKeymap(km);
+    t('空のキーマップを作れる: '+p.id, !st.error && st.layers.length > 0, st.error);
+    if(st.error) return;
+    t('キー数が合う: '+p.id, st.layers[0].bindings.length === p.keyCount,
+      `${st.layers[0].bindings.length} vs ${p.keyCount}`);
+    st.originalText = km;
+    st.combos = C.parseCombos(km); st.behaviors = C.parseBehaviors(km);
+    st.macros = C.parseMacros(km); st.condLayers = C.parseCondLayers(km);
+    st.trackball = C.parseTrackball(km);
+    st.groups = [{name:'MAIN', count:st.layers.length}];
+    st.layers[0].bindings[0] = '&kp A';
+    let out = '';
+    try{ out = C.generateKeymap(st); }catch(e){ t('書き出せる: '+p.id, false, e.message); }
+    t('書き出せる: '+p.id, out.includes('&kp A'));
+    const re = C.parseKeymap(out);
+    t('読み直せる: '+p.id, !re.error && re.layers[0].bindings.length === p.keyCount,
+      re.error || String(re.layers && re.layers[0].bindings.length));
+  });
+  C.setKeyboard(saved);
+  t('元のキーボードに戻せる', C.getKeyboard().id === saved.id);
+
+  // トラックボール設定はroBaだけ
+  t('トラックボール対応はroBaだけ',
+    P.filter(p=>p.features && p.features.trackball).map(p=>p.id).join(',') === 'roba');
+
+  // 画面
+  t('一覧が内蔵プロファイル全体から作られる',
+    ui.includes('BUILTIN_PROFILES.map(p=>({p, builtin:true}))'));
+  t('補足の説明が出る', ui.includes('p.note?'));
+  t('ヘルプに一覧がある', html.includes('<tr><td>Corne（6列 / crkbd）</td><td>42</td></tr>'));
+}
+
 section('13-a キーボード抽象化');
 {
   const dtsi = 'keys = <&key_physical_attrs 100 100 0 37 0 0 0>, <&key_physical_attrs 100 100 650 387 (-2000) 750 387>;';
@@ -182,7 +441,7 @@ section('13-a キーボード抽象化');
 /* ---------- 6.7 12-a: GitHub連携ヘルパ ---------- */
 section('12-a GitHub連携');
 {
-  // Node環境にbtoa/atobがない場合の補完
+  // Node利用環境にbtoa/atobがない場合の補完
   if(typeof globalThis.btoa==='undefined'){
     globalThis.btoa = s=>Buffer.from(s,'binary').toString('base64');
     globalThis.atob = b=>Buffer.from(b,'base64').toString('binary');
@@ -210,25 +469,25 @@ section('Windows互換チェック');
   t('部分一致で壊さない', C.fixWinIncompatible('&kp K_NEXT2')==='&kp K_NEXT2');
 }
 
-/* ---------- 6.7 環境間のレイヤー参照 ---------- */
+/* ---------- 6.7 利用環境間のレイヤー参照 ---------- */
 section('状態の保存・復元');
 {
   /* 保存先が3つある(Undo履歴 / ブラウザ保存 / バックアップJSON)。
      何を保存するかが分散すると、設定項目を足したときに黙って消える。 */
-  const st = C.parseKeymap(C.DEFAULT_KEYMAP);
+  const st = C.parseKeymap(SAMPLE || C.DEFAULT_KEYMAP);
   const full = Object.assign(C.pickState({}), {
-    originalText: C.DEFAULT_KEYMAP,
+    originalText: SAMPLE || C.DEFAULT_KEYMAP,
     layers: st.layers,
     groups: [{name:'US', count:st.layers.length, locale:'us', platform:'win', color:'#123456'}],
     keyboard: 'roba',
-    combos: C.parseCombos(C.DEFAULT_KEYMAP),
-    behaviors: C.parseBehaviors(C.DEFAULT_KEYMAP),
-    trackball: C.parseTrackball(C.DEFAULT_KEYMAP),
+    combos: C.parseCombos(SAMPLE || C.DEFAULT_KEYMAP),
+    behaviors: C.parseBehaviors(SAMPLE || C.DEFAULT_KEYMAP),
+    trackball: C.parseTrackball(SAMPLE || C.DEFAULT_KEYMAP),
     conf: Object.assign({}, C.CONF_DEFAULTS),
-    holdtap: {mt:C.parseHoldtapOne(C.DEFAULT_KEYMAP,'mt'), lt:C.parseHoldtapOne(C.DEFAULT_KEYMAP,'lt'),
-              sk:C.parseStickyOne(C.DEFAULT_KEYMAP,'sk'), sl:C.parseStickyOne(C.DEFAULT_KEYMAP,'sl')},
-    macros: C.parseMacros(C.DEFAULT_KEYMAP),
-    condLayers: C.parseCondLayers(C.DEFAULT_KEYMAP)
+    holdtap: {mt:C.parseHoldtapOne(SAMPLE || C.DEFAULT_KEYMAP,'mt'), lt:C.parseHoldtapOne(SAMPLE || C.DEFAULT_KEYMAP,'lt'),
+              sk:C.parseStickyOne(SAMPLE || C.DEFAULT_KEYMAP,'sk'), sl:C.parseStickyOne(SAMPLE || C.DEFAULT_KEYMAP,'sl')},
+    macros: C.parseMacros(SAMPLE || C.DEFAULT_KEYMAP),
+    condLayers: C.parseCondLayers(SAMPLE || C.DEFAULT_KEYMAP)
   });
 
   t('保存項目が一覧化されている', Array.isArray(C.STATE_KEYS) && C.STATE_KEYS.length>0);
@@ -590,23 +849,23 @@ section('レイヤーの複製・削除・移動');
   t('グループ入れ替えはcoreの処理を使う', ui.includes('swapGroups(state, gi, gj)'));
 }
 
-section('環境間のレイヤー参照');
+section('利用環境間のレイヤー参照');
 {
-  // 環境A(fw0-4) → 環境B(fw7-11)
+  // 利用環境A(fw0-4) → 利用環境B(fw7-11)
   const map = C.buildEnvOffsetMap({start:0,count:5}, {start:7,count:5});
   t('対応表を作る', JSON.stringify(map)==='{"0":7,"1":8,"2":9,"3":10,"4":11}');
   t('レイヤー数が違えば少ない方に合わせる',
     JSON.stringify(C.buildEnvOffsetMap({start:0,count:5},{start:7,count:3}))==='{"0":7,"1":8,"2":9}');
 
-  // 環境内の一時的なレイヤー切替 → 付け替える
+  // 利用環境内の一時的なレイヤー切替 → 付け替える
   t('&lt を付け替える', C.remapWithinEnv('&lt 2 SPACE', map)==='&lt 9 SPACE');
   t('&mo を付け替える', C.remapWithinEnv('&mo 3', map)==='&mo 10');
   t('&tog を付け替える', C.remapWithinEnv('&tog 1', map)==='&tog 8');
   t('&sl を付け替える', C.remapWithinEnv('&sl 4', map)==='&sl 11');
   t('カスタムhold-tapも付け替える', C.remapWithinEnv('&lt_to_layer_0 3 INT_HENKAN', map)==='&lt_to_layer_0 10 INT_HENKAN');
 
-  // 環境の切り替えは絶対指定 → そのまま
-  t('&to は付け替えない(環境切替)', C.remapWithinEnv('&to 0', map)==='&to 0'
+  // 利用環境の切り替えは絶対指定 → そのまま
+  t('&to は付け替えない(利用環境切替)', C.remapWithinEnv('&to 0', map)==='&to 0'
     && C.remapWithinEnv('&to 7', map)==='&to 7');
 
   // 対象外・範囲外
@@ -625,19 +884,19 @@ section('環境間のレイヤー参照');
   t('付け替えは往復で元に戻る', ng.length===0, ng.join(' | '));
 }
 
-/* ---------- 6.72 用語と単一環境 ---------- */
-section('用語 / 単一環境');
+/* ---------- 6.72 用語と利用環境が1つ ---------- */
+section('用語 / 利用環境が1つ');
 {
   t('用語が一箇所にまとまっている', typeof C.TERMS==='object' && !!C.TERMS.env && !!C.TERMS.shared);
   t('term() が引ける', C.term('env')===C.TERMS.env && C.term('unknown')==='unknown');
   t('envCount / isSimpleMode がUIにある', ui.includes('function envCount') && ui.includes('function isSimpleMode'));
-  t('単一環境でボタンを隠す処理がある', ui.includes("['btn-platform','btn-switcher','btn-order']"));
+  t('利用環境が1つでボタンを隠す処理がある', ui.includes("['btn-platform','btn-switcher','btn-order']"));
   t('共有という種別を持たない', !ui.includes('isSharedGroup') && !ui.includes('wantShared'));
   t('配列に「設定なし」がある', ui.includes("'<option value=\"\">設定なし</option>'"));
 }
 
 /* ---------- 6.75 レイヤー順序の検査 ---------- */
-section('環境追加ウィザード');
+section('利用環境追加ウィザード');
 {
   // 旧「US→JIS変換」ボタンが完全に撤去されていること(同期へ一本化)
   t('btn-jis がHTMLから消えている', !html.includes('btn-jis'));
@@ -657,19 +916,19 @@ section('環境追加ウィザード');
     /ae-create[\s\S]{0,3400}findShadowedRefs\(state\.groups, state\.layers\)/.test(ui));
 
   // ヘルプとi18n
-  t('ヘルプに環境の追加がある', html.includes('<dt>環境の追加</dt>'));
+  t('ヘルプに利用環境の追加がある', html.includes('<dt>利用環境の追加</dt>'));
   t('ヘルプから旧変換ボタンの記述が消えている', !html.includes('変換ボタンは差異があるときだけ有効'));
-  ['環境を追加','コピー元:','作成','既存の環境から配置をコピーして変換する'].forEach(k=>{
+  ['利用環境を追加','コピー元:','作成','既存の利用環境から配置をコピーして変換する'].forEach(k=>{
     t('英訳がある: '+k, scripts[0][1].includes("'"+k+"':'"));
   });
   t('廃止した項目の英訳が残っていない',
     !scripts[0][1].includes("'⇄ US→JIS変換'") && !scripts[0][1].includes("'共有レイヤーを最後に移動'"));
 }
 
-section('環境追加ウィザードの実動作');
+section('利用環境追加ウィザードの実動作');
 {
   const convBindingFull = C.convBindingFull;   // core へ移設済み
-  const raw = C.DEFAULT_KEYMAP;
+  const raw = SAMPLE || C.DEFAULT_KEYMAP;
   const st = C.parseKeymap(raw);
   st.originalText = raw;
   st.groups = [{name:'US', count:5}, {name:'GEN', count:st.layers.length-5}];
@@ -696,7 +955,7 @@ section('環境追加ウィザードの実動作');
 
   const before = st.layers.slice(s0.start, s0.start+s0.count).flatMap(l=>l.bindings);
 
-  // --- US配列 × macOS の環境を作る ---
+  // --- US配列 × macOS の利用環境を作る ---
   const mac = build('us','mac');
   t('レイヤー数がコピー元と同じ', mac.out.length === s0.count);
   t('キー数が保たれている', mac.out.every((l,i)=>l.bindings.length === st.layers[s0.start+i].bindings.length));
@@ -710,20 +969,20 @@ section('環境追加ウィザードの実動作');
     }
     if(tk[0]==='&to' && Number(tk[1])>=dstStart) badTo++;
   }));
-  t('自環境内のレイヤー参照が付け替わる', refIn > 0, '内'+refIn);
-  t('環境外(共通層)への参照は温存される', refOut.every(b=>Number(b.split(/\s+/)[1]) < dstStart), JSON.stringify(refOut));
-  t('&to は付け替えない(環境切替は絶対番号)', badTo === 0);
+  t('自利用環境内のレイヤー参照が付け替わる', refIn > 0, '内'+refIn);
+  t('利用環境外(共通層)への参照は温存される', refOut.every(b=>Number(b.split(/\s+/)[1]) < dstStart), JSON.stringify(refOut));
+  t('&to は付け替えない(利用環境切替は絶対番号)', badTo === 0);
   t('Win→Macで変換が起きる', mac.out.flatMap(l=>l.bindings).join(' ') !== before.join(' '));
   t('Win→Macで壊れた出力がない', !/&undefined|&null|NaN/.test(mac.out.flatMap(l=>l.bindings).join(' ')));
 
-  // 環境外を指す参照 = 後ろの環境から前を呼ぶ形。ウィザードはこれを警告する
+  // 利用環境外を指す参照 = 後ろの利用環境から前を呼ぶ形。ウィザードはこれを警告する
   if(refOut.length){
     const shadow = C.findShadowedRefs(
       st.groups.concat([{name:'MAC', count:s0.count}]), st.layers.concat(mac.out));
     t('隠れる参照を検出できる(警告の根拠)', shadow.length > 0, JSON.stringify(shadow));
   }
 
-  // --- JIS配列の環境を作る ---
+  // --- JIS配列の利用環境を作る ---
   const jis = build('jis', null);
   const jflat = jis.out.flatMap(l=>l.bindings);
   t('US→JISで変換が起きる', jflat.join(' ') !== before.join(' '));
@@ -742,7 +1001,7 @@ section('環境追加ウィザードの実動作');
   let out = '';
   try { out = C.generateKeymap(st); } catch(e){ t('書き出しで例外が出ない', false, e.message); }
   t('.keymap として書き出せる', out.length > 0 && out.includes('keymap'));
-  t('書き出しに新環境が含まれる', /MAC_/.test(out));
+  t('書き出しに新利用環境が含まれる', /MAC_/.test(out));
   if(out){
     const re = C.parseKeymap(out);
     t('読み直してレイヤー数が一致', re.layers.length === st.layers.length, re.layers.length+' vs '+st.layers.length);
@@ -751,14 +1010,14 @@ section('環境追加ウィザードの実動作');
   }
 }
 
-section('コンボの環境別対応');
+section('コンボの利用環境別対応');
 {
   const groups = [
     {name:'US',  count:3, locale:'us',  platform:'win'},
     {name:'JIS', count:3, locale:'jis', platform:'win'},
     {name:'GEN', count:2, locale:null,  platform:null}
   ];
-  // 環境属性の純関数化
+  // 利用環境属性の純関数化
   t('localeOfGroup が明示設定を返す', C.localeOfGroup(groups,1)==='jis');
   t('localeOfGroup が設定なしを返す', C.localeOfGroup(groups,2)===null);
   t('古いデータは名前から推測する', C.localeOfGroup([{name:'JIS',count:1}],0)==='jis');
@@ -766,46 +1025,46 @@ section('コンボの環境別対応');
   t('platformOfGroup が動く',
     C.platformOfGroup([{name:'MAC',count:1}],0)==='mac' && C.platformOfGroup(groups,0)==='win');
 
-  // 効く環境の判定
+  // 効く利用環境の判定
   const all = {name:'q', binding:'&kp LS(SQT)', keyPositions:[1,2], layers:[]};
-  t('layers未指定は全環境に効く', C.comboEnvIndices(all, groups).join(',')==='0,1,2');
-  t('layers指定で環境が絞られる',
+  t('layers未指定は全利用環境に効く', C.comboEnvIndices(all, groups).join(',')==='0,1,2');
+  t('layers指定で利用環境が絞られる',
     C.comboEnvIndices({...all, layers:[0,1]}, groups).join(',')==='0');
-  t('環境をまたぐlayers指定も拾える',
+  t('利用環境をまたぐlayers指定も拾える',
     C.comboEnvIndices({...all, layers:[2,3]}, groups).join(',')==='0,1');
 
-  // 環境依存の検出
+  // 利用環境依存の検出
   const issues = C.findComboEnvIssues(groups, [all]);
-  t('記号コンボが環境依存として検出される', issues.length===1, JSON.stringify(issues));
+  t('記号コンボが利用環境依存として検出される', issues.length===1, JSON.stringify(issues));
   if(issues.length){
-    t('基準は最初の環境', issues[0].baseName==='US');
-    t('JIS環境で別の入力になると分かる', issues[0].diffs.some(d=>d.name==='JIS'));
+    t('基準は最初の利用環境', issues[0].baseName==='US');
+    t('JIS利用環境で別の入力になると分かる', issues[0].diffs.some(d=>d.name==='JIS'));
     t('変換後の動作が入っている', issues[0].diffs.every(d=>d.binding && d.binding!==all.binding));
   }
-  // 環境で変わらないものは検出しない
+  // 利用環境で変わらないものは検出しない
   t('Bluetoothコンボは検出しない', C.findComboEnvIssues(groups, [{name:'b', binding:'&bt BT_SEL 0', keyPositions:[3,4], layers:[]}]).length===0);
   t('文字キーのコンボは検出しない', C.findComboEnvIssues(groups, [{name:'e', binding:'&kp ESC', keyPositions:[5,6], layers:[]}]).length===0);
-  t('1環境だけなら検出しない', C.findComboEnvIssues([{name:'US',count:3,locale:'us'}], [all]).length===0);
-  t('既に環境ごとなら検出しない',
+  t('1利用環境だけなら検出しない', C.findComboEnvIssues([{name:'US',count:3,locale:'us'}], [all]).length===0);
+  t('既に利用環境ごとなら検出しない',
     C.findComboEnvIssues(groups, [{...all, layers:[0,1,2]}]).length===0);
 
   // 分割
   const parts = C.splitComboForEnvs(all, groups);
-  t('環境の数だけ複製される', parts && parts.length===3, parts? parts.length : 'null');
+  t('利用環境の数だけ複製される', parts && parts.length===3, parts? parts.length : 'null');
   if(parts){
-    t('名前が環境ごとに変わる', new Set(parts.map(p=>p.name)).size===3, parts.map(p=>p.name).join(','));
+    t('名前が利用環境ごとに変わる', new Set(parts.map(p=>p.name)).size===3, parts.map(p=>p.name).join(','));
     t('名前がdevicetreeで使える形', parts.every(p=>/^[A-Za-z_][\w]*$/.test(p.name)), parts.map(p=>p.name).join(','));
-    t('layers がその環境のレイヤーだけを指す',
+    t('layers がその利用環境のレイヤーだけを指す',
       parts[0].layers.join(',')==='0,1,2' && parts[1].layers.join(',')==='3,4,5' && parts[2].layers.join(',')==='6,7');
-    t('基準環境の動作は変わらない', parts[0].binding===all.binding);
-    t('JIS環境の動作が変換されている', parts[1].binding!==all.binding && !/undefined|NaN/.test(parts[1].binding));
+    t('基準利用環境の動作は変わらない', parts[0].binding===all.binding);
+    t('JIS利用環境の動作が変換されている', parts[1].binding!==all.binding && !/undefined|NaN/.test(parts[1].binding));
     t('キー位置は引き継がれる', parts.every(p=>p.keyPositions.join(',')==='1,2'));
     t('分割後は検出されなくなる', C.findComboEnvIssues(groups, parts).length===0);
   }
 
   // .keymap への書き出しと読み直し
   {
-    const raw = C.DEFAULT_KEYMAP;
+    const raw = SAMPLE || C.DEFAULT_KEYMAP;
     const st = C.parseKeymap(raw); st.originalText = raw;
     st.combos = (parts||[]).map(p=>({...p, timeout:50, idle:null, slowRelease:false}));
     let out=''; try{ out = C.generateKeymap(st); }catch(e){ t('分割コンボを書き出せる', false, e.message); }
@@ -822,16 +1081,16 @@ section('コンボの環境別対応');
 
   // UI側
   t('整合性チェックに組み込まれている', scripts[0][1].includes('findComboEnvIssues(state.groups||[], state.combos||[])'));
-  t('単一環境では出さない', /function renderComboEnvWarn\(\)\{[\s\S]{0,300}isSimpleMode\(\)/.test(ui));
-  t('ヘルプに記載がある', html.includes('<dt>コンボと環境</dt>'));
-  t('英訳がある', scripts[0][1].includes("'環境ごとに分ける':'"));
+  t('利用環境が1つでは出さない', /function renderComboEnvWarn\(\)\{[\s\S]{0,300}isSimpleMode\(\)/.test(ui));
+  t('ヘルプに記載がある', html.includes('<dt>コンボと利用環境</dt>'));
+  t('英訳がある', scripts[0][1].includes("'利用環境ごとに分ける':'"));
   t('groupLocale は core へ委譲している', ui.includes('function groupLocale(gi){ return localeOfGroup(state.groups, gi); }'));
 }
 
-section('マクロ等の環境別対応');
+section('マクロ等の利用環境別対応');
 {
-  /* コンボと同じ問題。定義は1つなのに複数の環境から呼ばれるため、
-     記号を出す定義は配列の違う環境で別の記号になる。 */
+  /* コンボと同じ問題。定義は1つなのに複数の利用環境から呼ばれるため、
+     記号を出す定義は配列の違う利用環境で別の記号になる。 */
   const mk = ()=>({
     groups:[{name:'US', count:2, locale:'us', platform:'win'},
             {name:'JIS', count:2, locale:'jis', platform:'win'}],
@@ -872,14 +1131,14 @@ section('マクロ等の環境別対応');
     t('マクロの他のステップが書き換わる', mc.steps[0].binding==='&kp Z' && mc.steps[2].binding==='&kp W');
   }
 
-  // 呼び出し元の環境
+  // 呼び出し元の利用環境
   {
     const s0 = mk();
-    t('呼んでいる環境が分かる', C.envIndicesUsingBehavior(s0,'mm').join(',')==='0,1');
+    t('呼んでいる利用環境が分かる', C.envIndicesUsingBehavior(s0,'mm').join(',')==='0,1');
     t('呼ばれていなければ空', C.envIndicesUsingBehavior(s0,'nothing').length===0);
     t('部分一致では拾わない', C.envIndicesUsingBehavior(s0,'m').length===0);
     s0.layers[2].bindings[0] = '&kp A';
-    t('片方の環境だけなら1つ', C.envIndicesUsingBehavior(s0,'mm').join(',')==='0');
+    t('片方の利用環境だけなら1つ', C.envIndicesUsingBehavior(s0,'mm').join(',')==='0');
   }
 
   // 検出
@@ -894,22 +1153,22 @@ section('マクロ等の環境別対応');
     t("' はJISでShift+7になる", byName.mm.diffs[0].bindings[0]==='&kp LS(N7)', byName.mm.diffs[0].bindings[0]);
     t('" はJISでShift+2になる', byName.mm.diffs[0].bindings[1]==='&kp LS(N2)', byName.mm.diffs[0].bindings[1]);
     t('@ はJISで括弧キーになる', byName.at_macro.diffs[0].bindings[0]==='&kp LBKT', byName.at_macro.diffs[0].bindings[0]);
-    t('基準は最初の環境', iss.every(x=>x.baseName==='US'));
-    t('環境で変わらない定義は検出しない', !byName.plain);
+    t('基準は最初の利用環境', iss.every(x=>x.baseName==='US'));
+    t('利用環境で変わらない定義は検出しない', !byName.plain);
     t('自動生成のmod-morphは対象外', !byName.jis_lbkt);
     t('自動生成の判定', C.isGeneratedMorph('jis_x') && C.isGeneratedMorph('loc_x') && !C.isGeneratedMorph('mm'));
   }
   {
-    // 1つの環境からしか呼ばれていなければ問題にしない
+    // 1つの利用環境からしか呼ばれていなければ問題にしない
     const s0 = mk();
     s0.layers[2].bindings = ['&kp A','&kp A','&kp A','&kp A','&kp A'];
-    t('片方の環境だけなら検出しない', C.findBehaviorEnvIssues(s0).length===0);
+    t('片方の利用環境だけなら検出しない', C.findBehaviorEnvIssues(s0).length===0);
   }
   {
-    // 環境が1つなら常に問題なし
+    // 利用環境が1つなら常に問題なし
     const s0 = mk();
     s0.groups = [{name:'US', count:4, locale:'us', platform:'win'}];
-    t('単一環境では検出しない', C.findBehaviorEnvIssues(s0).length===0);
+    t('利用環境が1つでは検出しない', C.findBehaviorEnvIssues(s0).length===0);
   }
   {
     // 配列が同じなら問題なし
@@ -923,20 +1182,20 @@ section('マクロ等の環境別対応');
     const s0 = mk();
     const iss = C.findBehaviorEnvIssues(s0);
     const made = iss.slice().reverse().flatMap(x=>C.splitBehaviorForEnvs(s0, x));
-    t('環境ごとに定義が増える', made.length===3, made.join(','));
-    t('名前が環境名になる', made.every(n=>n.endsWith('_jis')), made.join(','));
+    t('利用環境ごとに定義が増える', made.length===3, made.join(','));
+    t('名前が利用環境名になる', made.every(n=>n.endsWith('_jis')), made.join(','));
     t('名前がdevicetreeで使える形', made.every(n=>/^[A-Za-z_]\w*$/.test(n)));
     t('mod-morphが追加される', s0.behaviors.morphs.some(m=>m.name==='mm_jis'));
     t('tap-danceが追加される', s0.behaviors.tds.some(d=>d.name==='my_td_jis'));
     t('マクロが追加される', s0.macros.items.some(m=>m.name==='at_macro_jis'));
     t('追加した定義の中身が変換されている',
       s0.behaviors.morphs.find(m=>m.name==='mm_jis').b1==='&kp LS(N7)');
-    t('JIS環境の参照が差し替わる',
+    t('JIS利用環境の参照が差し替わる',
       s0.layers[2].bindings.slice(0,3).join(' ')==='&mm_jis &my_td_jis &at_macro_jis',
       s0.layers[2].bindings.slice(0,3).join(' '));
-    t('基準環境の参照は変わらない',
+    t('基準利用環境の参照は変わらない',
       s0.layers[0].bindings.slice(0,3).join(' ')==='&mm &my_td &at_macro');
-    t('基準環境の定義も変わらない', s0.behaviors.morphs[0].b1==='&kp SQT');
+    t('基準利用環境の定義も変わらない', s0.behaviors.morphs[0].b1==='&kp SQT');
     t('関係ない定義は差し替えない', s0.layers[2].bindings[4]==='&plain');
     t('通常キーは触らない', s0.layers[2].bindings[3]==='&kp A');
     t('分割後は検出されなくなる', C.findBehaviorEnvIssues(s0).length===0);
@@ -944,17 +1203,17 @@ section('マクロ等の環境別対応');
       new Set(C.collectBehaviorDefs(s0).map(d=>d.name)).size===C.collectBehaviorDefs(s0).length);
   }
   {
-    // 3環境でも動くか
+    // 3利用環境でも動くか
     const s0 = mk();
     s0.groups.push({name:'UK', count:2, locale:'uk', platform:'win'});
     s0.layers.push({name:'k0', bindings:['&mm','&kp A','&kp A','&kp A','&kp A']},
                    {name:'k1', bindings:['&kp B','&trans','&trans','&trans','&trans']});
     const iss = C.findBehaviorEnvIssues(s0).filter(x=>x.name==='mm');
-    t('3環境ぶんの差異が出る', iss[0].diffs.length===2, JSON.stringify(iss[0].diffs.map(d=>d.name)));
+    t('3利用環境ぶんの差異が出る', iss[0].diffs.length===2, JSON.stringify(iss[0].diffs.map(d=>d.name)));
     C.splitBehaviorForEnvs(s0, iss[0]);
-    t('環境ごとに別の定義ができる',
+    t('利用環境ごとに別の定義ができる',
       s0.behaviors.morphs.some(m=>m.name==='mm_jis') && s0.behaviors.morphs.some(m=>m.name==='mm_uk'));
-    t('UK環境の参照も差し替わる', s0.layers[4].bindings[0]==='&mm_uk', s0.layers[4].bindings[0]);
+    t('UK利用環境の参照も差し替わる', s0.layers[4].bindings[0]==='&mm_uk', s0.layers[4].bindings[0]);
   }
   {
     // 名前が衝突する場合はずらす
@@ -1005,9 +1264,9 @@ section('マクロ等の環境別対応');
   t('mod-morph画面で描画される', ui.includes("renderBehEnvWarn('bm-envwarn', 'morph')"));
   t('tap-dance画面で描画される', ui.includes("renderBehEnvWarn('td-envwarn', 'td')"));
   t('マクロ画面で描画される', ui.includes("renderBehEnvWarn('mc-envwarn', 'macro')"));
-  t('単一環境では出さない', /function renderBehEnvWarn\([\s\S]{0,300}isSimpleMode\(\)/.test(ui));
+  t('利用環境が1つでは出さない', /function renderBehEnvWarn\([\s\S]{0,300}isSimpleMode\(\)/.test(ui));
   t('整合性チェックに組み込まれている', scripts[0][1].includes('findBehaviorEnvIssues(state).forEach'));
-  t('ヘルプに記載がある', html.includes('<dt>マクロ・tap-dance と環境</dt>'));
+  t('ヘルプに記載がある', html.includes('<dt>マクロ・tap-dance と利用環境</dt>'));
 }
 
 section('レイヤー順序');
@@ -1067,7 +1326,20 @@ section('レイヤー順序');
 section('汎用配列変換');
 {
   const conv = (b,f,to,sm,sink)=>C.convBindingLocale(b,f,to,sm,sink||(()=>{})).raw;
-  t('ロケール一覧', C.LOCALE_LIST.length>=5 && C.LOCALE_LIST.map(l=>l.id).includes('dvorak'));
+  t('対応する配列は言語配列だけ',
+    C.LOCALE_LIST.map(l=>l.id).sort().join(',')==='de,jis,uk,us',
+    C.LOCALE_LIST.map(l=>l.id).join(','));
+  t('特殊配列は対象外', !C.LOCALE_LIST.some(l=>/dvorak|colemak|workman/i.test(l.id)));
+  // 画面に出る文言(スクリプト以外)に残っていないこと。
+  // コード中の「なぜ対象外にしたか」の説明コメントは残してよい。
+  {
+    const visible = html.replace(/<script[\s\S]*?<\/script>/g, '');
+    t('画面の説明にも残っていない', !/dvorak/i.test(visible),
+      (visible.match(/.{0,20}[Dd]vorak.{0,20}/)||[''])[0]);
+  }
+  t('文字テーブルにも残っていない',
+    !Object.keys(C.LOCALE_CHARS).some(k=>/dvorak|colemak|workman/i.test(k)),
+    Object.keys(C.LOCALE_CHARS).join(','));
   t('同一ロケールは不変', conv('&kp AT_SIGN','us','us',true)==='&kp AT_SIGN');
 
   // --- 本質的な検証: 変換後に「同じ文字」が出るか ---
@@ -1125,16 +1397,14 @@ section('汎用配列変換');
   });
   t('既存US→JIS実装と一致(記号)', mismatch2.length===0, mismatch2.slice(0,3).join(' | '));
 
-  // --- 文字配列(QWERTZ / Dvorak) ---
+  // --- 文字の並びが違う言語配列(ドイツ語 QWERTZ) ---
   t('QWERTZ: Y⇄Z', conv('&kp Y','us','de',false)==='&kp Z' && conv('&kp Z','us','de',false)==='&kp Y');
   t('QWERTZ: 他の文字は不変', conv('&kp A','us','de',false)==='&kp A' && conv('&kp Q','us','de',false)==='&kp Q');
-  t('Dvorak: S→SEMI', conv('&kp S','us','dvorak',false)==='&kp SEMI');
-  t('Dvorak: Q→X', conv('&kp Q','us','dvorak',false)==='&kp X');
   let dv = 0;
   'QWERTYUIOPASDFGHJKLZXCVBNM'.split('').forEach(c=>{
-    if(conv(conv('&kp '+c,'us','dvorak',false),'dvorak','us',false)!=='&kp '+c) dv++;
+    if(conv(conv('&kp '+c,'us','de',false),'de','us',false)!=='&kp '+c) dv++;
   });
-  t('Dvorak 文字26種が往復一致', dv===0, dv+'件不一致');
+  t('ドイツ語 文字26種が往復一致', dv===0, dv+'件不一致');
 
   // --- UK(ISO) ---
   t('UK: @ は Shift+SQT', conv('&kp AT_SIGN','us','uk',false)==='&kp LS(SQT)');
@@ -1151,7 +1421,7 @@ section('汎用配列変換');
   // --- ショートカットや非文字キーは触らない ---
   t('ショートカットは不変', conv('&kp LC(C)','us','jis',true)==='&kp LC(C)');
   t('レイヤー系は不変', conv('&lt 2 SPACE','us','jis',true)==='&lt 2 SPACE');
-  t('透過は不変', conv('&trans','us','dvorak',true)==='&trans');
+  t('透過は不変', conv('&trans','us','de',true)==='&trans');
   t('矢印は不変', conv('&kp LEFT','us','jis',true)==='&kp LEFT');
 
   // --- 表示テーブルへの影響がないこと ---
@@ -1264,7 +1534,7 @@ section('日本語入力キーのOS対応');
 
   // 既定のキーマップは変換/無変換を使っている → Windows利用者に知らせられること
   {
-    const st = C.parseKeymap(C.DEFAULT_KEYMAP);
+    const st = C.parseKeymap(SAMPLE || C.DEFAULT_KEYMAP);
     const hits = st.layers.flatMap(l=>l.bindings).filter(b=>C.findOsIssues(b,['win']).length);
     t('既定キーマップのWindows非対応キーを検出できる', hits.length>0, hits.slice(0,3).join(' / '));
   }
@@ -1336,9 +1606,9 @@ section('キーコードの別名(回帰)');
       C.convBindingPlatform(b,'win2mac').raw===b && C.convBindingPlatform(b,'mac2win').raw===b);
   });
 
-  // 別名を使ったコンボも環境依存として拾えるか
+  // 別名を使ったコンボも利用環境依存として拾えるか
   {
-    // 基準は最初の環境。LANGUAGE_1 は macOS 側の書き方なので mac→win で変換される
+    // 基準は最初の利用環境。LANGUAGE_1 は macOS 側の書き方なので mac→win で変換される
     const g = [{name:'MAC',count:2,locale:'jis',platform:'mac'},
                {name:'WIN',count:2,locale:'jis',platform:'win'}];
     const iss = C.findComboEnvIssues(g, [{name:'cmd', binding:'&kp LEFT_WIN', keyPositions:[1,2], layers:[]}]);
@@ -1399,13 +1669,13 @@ section('OS別のキー表示');
 
   // 表示だけの違いで、キーコードは変わらない
   {
-    const st = C.parseKeymap(C.DEFAULT_KEYMAP);
-    st.originalText = C.DEFAULT_KEYMAP;
-    st.combos = C.parseCombos(C.DEFAULT_KEYMAP);
-    st.behaviors = C.parseBehaviors(C.DEFAULT_KEYMAP);
-    st.macros = C.parseMacros(C.DEFAULT_KEYMAP);
-    st.condLayers = C.parseCondLayers(C.DEFAULT_KEYMAP);
-    st.trackball = C.parseTrackball(C.DEFAULT_KEYMAP);
+    const st = C.parseKeymap(SAMPLE || C.DEFAULT_KEYMAP);
+    st.originalText = SAMPLE || C.DEFAULT_KEYMAP;
+    st.combos = C.parseCombos(SAMPLE || C.DEFAULT_KEYMAP);
+    st.behaviors = C.parseBehaviors(SAMPLE || C.DEFAULT_KEYMAP);
+    st.macros = C.parseMacros(SAMPLE || C.DEFAULT_KEYMAP);
+    st.condLayers = C.parseCondLayers(SAMPLE || C.DEFAULT_KEYMAP);
+    st.trackball = C.parseTrackball(SAMPLE || C.DEFAULT_KEYMAP);
     const before = C.generateKeymap(st);
     C.kcLabel('LALT','mac'); C.kcLabel('LGUI','win');
     t('表示を切り替えても書き出しは変わらない', C.generateKeymap(st)===before);
@@ -1573,16 +1843,16 @@ section('OSの系統(iOS / Linux / Android)');
   t('系統が同じ場合の案内がある', ui.includes('ショートカットの体系が同じため'));
 }
 
-section('環境の設定チップ');
+section('利用環境の設定チップ');
 {
   t('一覧にチップを出す', ui.includes("chip.className = 'envchip'"));
   t('チップは短縮名を使う', ui.includes('envSummary(gi, true)'));
   t('ツールチップは正式名を使う', ui.includes('envSummary(gi).text'));
-  t('単一環境では隠す', ui.includes("if(simple) chip.style.display = 'none';"));
+  t('利用環境が1つでは隠す', ui.includes("if(simple) chip.style.display = 'none';"));
   t('チップのスタイルがある', html.includes('.envchip{'));
   t('未設定は破線で示す', html.includes('.envchip.unset{'));
-  t('ヘルプに記載がある', html.includes('<dt>環境の設定を変える</dt>'));
-  t('英訳がある', scripts[0][1].includes("'環境の設定':'"));
+  t('ヘルプに記載がある', html.includes('<dt>利用環境の設定を変える</dt>'));
+  t('英訳がある', scripts[0][1].includes("'利用環境の設定':'"));
 
   // envSummary は state に依存するので、同じ組み立てを再現して確かめる
   const label = (loc, os)=>{
@@ -1594,7 +1864,7 @@ section('環境の設定チップ');
   };
   t('両方あると「配列 × OS」', label('jis','win')==='JIS × Windows', label('jis','win'));
   t('チップでは補足の括弧を落とす', label('us',null)==='US' && label('de',null)==='DE', label('de',null));
-  t('括弧のない配列名はそのまま', label('dvorak',null)==='Dvorak');
+  t('配列名は補足を落として出す', label('uk',null)==='UK', label('uk',null));
   t('OSだけならOS名', label(null,'ios')==='iOS', label(null,'ios'));
   t('どちらもなければ促す', label(null,null)==='配列 / OS を設定');
   t('osName が全OSを引ける', C.OS_LIST.every(o=>C.osName(o.id)===o.name));
@@ -1636,10 +1906,10 @@ section('ヘルプ英訳');
 /* ---------- 7. バージョン/プロファイル ---------- */
 section('想定利用の通し確認');
 {
-  /* ベースを1つ作り、環境を足して同じ操作感を得る、という本ツールの中心的な使い方を
+  /* ベースを1つ作り、利用環境を足して同じ操作感を得る、という本ツールの中心的な使い方を
      最初から最後まで動かす。
        ベース = JIS × Windows / 追加 = US × macOS、US × iPadOS */
-  const raw = C.DEFAULT_KEYMAP;
+  const raw = SAMPLE || C.DEFAULT_KEYMAP;
   const st = C.parseKeymap(raw);
   st.originalText = raw;
   st.combos = C.parseCombos(raw);
@@ -1681,14 +1951,14 @@ section('想定利用の通し確認');
   const ipadStart = st.layers.length;
   addEnv('IPAD','us','ios',0);
 
-  t('環境が3つ + 共通層になった', st.groups.length===4, st.groups.map(g=>g.name).join(','));
+  t('利用環境が3つ + 共通層になった', st.groups.length===4, st.groups.map(g=>g.name).join(','));
   t('レイヤー数が想定どおり', st.layers.length === baseCount+genCount+baseCount*2, String(st.layers.length));
   t('JIS→US変換でmod-morphが生成された', mac.used.size>0, [...mac.used].join(',')||'0件');
   t('生成したmod-morphが登録されている',
     [...mac.used].every(nm=>st.behaviors.morphs.some(m=>m.name===nm)));
 
-  // macOS と iPadOS は同じ系統。自環境内の参照の差を除けば配置は一致する
-  // 自環境内を指す参照だけ相対番号に直す(共通層への参照はそのまま比べる)。
+  // macOS と iPadOS は同じ系統。自利用環境内の参照の差を除けば配置は一致する
+  // 自利用環境内を指す参照だけ相対番号に直す(共通層への参照はそのまま比べる)。
   // 対象は本体と同じ WITHIN_ENV_REFS を使う(&lt_to_layer_0 のような独自ビヘイビアも拾う)
   const rel = (arr, base)=>arr.map(b=>{
     const m = b.trim().match(/^(&\S+)\s+(\d+)(.*)$/);
@@ -1700,7 +1970,7 @@ section('想定利用の通し確認');
   const ipadB = rel(st.layers.slice(ipadStart, ipadStart+baseCount).flatMap(l=>l.bindings), ipadStart);
   t('macOSとiPadOSで配置が一致する', JSON.stringify(macB)===JSON.stringify(ipadB),
     macB.filter((b,i)=>b!==ipadB[i]).slice(0,2).join(' / '));
-  t('レイヤー番号は環境ごとにずれている',
+  t('レイヤー番号は利用環境ごとにずれている',
     JSON.stringify(st.layers.slice(macStart, macStart+baseCount).flatMap(l=>l.bindings))
     !== JSON.stringify(st.layers.slice(ipadStart, ipadStart+baseCount).flatMap(l=>l.bindings)));
   t('レイヤー参照がすべて有効な範囲',
@@ -1711,13 +1981,13 @@ section('想定利用の通し確認');
       return !isNaN(n) && n>=0 && n<st.layers.length;
     })));
 
-  // コンボを環境ごとに分ける
+  // コンボを利用環境ごとに分ける
   const comboIssues = C.findComboEnvIssues(st.groups, st.combos);
   comboIssues.slice().reverse().forEach(x=>{
     const parts = C.splitComboForEnvs(st.combos[x.ci], st.groups);
     if(parts) st.combos.splice(x.ci, 1, ...parts);
   });
-  t('分割後は環境依存のコンボが残らない', C.findComboEnvIssues(st.groups, st.combos).length===0);
+  t('分割後は利用環境依存のコンボが残らない', C.findComboEnvIssues(st.groups, st.combos).length===0);
   t('コンボ名が重複しない', new Set(st.combos.map(c=>c.name)).size===st.combos.length);
 
   // OS互換チェック(Windows)
@@ -1738,7 +2008,7 @@ section('想定利用の通し確認');
   let out='';
   try{ out = C.generateKeymap(st); }catch(e){ t('書き出しで例外が出ない', false, e.message); }
   t('.keymap を書き出せる', out.length>0);
-  t('3環境ぶんのノードが入っている', /WIN_/.test(out) && /MAC_/.test(out) && /IPAD_/.test(out));
+  t('3利用環境ぶんのノードが入っている', /WIN_/.test(out) && /MAC_/.test(out) && /IPAD_/.test(out));
   {
     const gen = st.layers.flatMap(l=>l.bindings).join(' ');
     t('壊れたバインディングがない', !/undefined|NaN|&&/.test(gen),
@@ -1754,7 +2024,7 @@ section('想定利用の通し確認');
     t('読み直してコンボが一致', C.parseCombos(out).length===st.combos.length);
   }
 
-  // 共通層(GEN)が環境より前にあるため、後ろの環境から呼ぶと隠れる
+  // 共通層(GEN)が利用環境より前にあるため、後ろの利用環境から呼ぶと隠れる
   const shadow = C.findShadowedRefs(st.groups, st.layers);
   t('隠れる参照を検出する', shadow.length>0, JSON.stringify(shadow.map(x=>`${x.groupName}→fw${x.target}`)));
   if(shadow.length){
@@ -1804,13 +2074,13 @@ section('整合性チェック');
   /* 書き出し前の最後の砦。「問題があるのに出ない」と「正常なのに出る」の
      どちらも困るので、両方向を確かめる。 */
   const base = ()=>{
-    const st = C.parseKeymap(C.DEFAULT_KEYMAP);
-    st.originalText = C.DEFAULT_KEYMAP;
-    st.combos = C.parseCombos(C.DEFAULT_KEYMAP);
-    st.behaviors = C.parseBehaviors(C.DEFAULT_KEYMAP);
-    st.macros = C.parseMacros(C.DEFAULT_KEYMAP);
-    st.condLayers = C.parseCondLayers(C.DEFAULT_KEYMAP);
-    st.trackball = C.parseTrackball(C.DEFAULT_KEYMAP);
+    const st = C.parseKeymap(SAMPLE || C.DEFAULT_KEYMAP);
+    st.originalText = SAMPLE || C.DEFAULT_KEYMAP;
+    st.combos = C.parseCombos(SAMPLE || C.DEFAULT_KEYMAP);
+    st.behaviors = C.parseBehaviors(SAMPLE || C.DEFAULT_KEYMAP);
+    st.macros = C.parseMacros(SAMPLE || C.DEFAULT_KEYMAP);
+    st.condLayers = C.parseCondLayers(SAMPLE || C.DEFAULT_KEYMAP);
+    st.trackball = C.parseTrackball(SAMPLE || C.DEFAULT_KEYMAP);
     st.groups = [{name:'MAIN', count:st.layers.length, locale:'us', platform:'mac'}];
     return st;
   };
@@ -1822,8 +2092,8 @@ section('整合性チェック');
     const v = C.runValidation(st, ['mac']);
     t('正常な設定では存在しない参照を指摘しない', !has(v,'存在しないレイヤー'), v.join(' / ').slice(0,120));
     t('正常な設定では未定義ビヘイビアを指摘しない', !has(v,'未定義のビヘイビア'), v.join(' / ').slice(0,120));
-    t('単一環境では順序を指摘しない', !has(v,'無視され'));
-    t('単一環境では透過を指摘しない', !has(v,'透過'));
+    t('利用環境が1つでは順序を指摘しない', !has(v,'無視され'));
+    t('利用環境が1つでは透過を指摘しない', !has(v,'透過'));
   }
 
   // 存在しないレイヤーへの参照
@@ -1901,26 +2171,26 @@ section('整合性チェック');
     t('対象OSを外せば指摘しない', !has(C.runValidation(st,['linux']),'K_MUTE'));
     t('対象OS未指定でも既定で点検する', C.runValidation(st, []).length >= 1);
   }
-  // 環境まわり
+  // 利用環境まわり
   {
     const st = base();
     st.groups = [{name:'A', count:3, locale:'us', platform:'win'},
                  {name:'B', count:st.layers.length-3, locale:'jis', platform:'win'}];
-    st.layers[3].bindings[0] = '&mo 1';   // 後ろの環境から前を呼ぶ
+    st.layers[3].bindings[0] = '&mo 1';   // 後ろの利用環境から前を呼ぶ
     t('隠れるレイヤー参照を指摘する', has(C.runValidation(st,['win']),'無視され'));
   }
   {
     const st = base();
     st.groups = [{name:'A', count:3}, {name:'B', count:st.layers.length-3}];
     st.layers[3].bindings = st.layers[3].bindings.map(()=>'&trans');
-    t('2つ目の環境の先頭が透過だと指摘する', has(C.runValidation(st,['win']),'透過'));
+    t('2つ目の利用環境の先頭が透過だと指摘する', has(C.runValidation(st,['win']),'透過'));
   }
   {
     const st = base();
     st.groups = [{name:'US', count:2, locale:'us', platform:'win'},
                  {name:'JIS', count:st.layers.length-2, locale:'jis', platform:'win'}];
     st.combos.push({name:'dq', binding:'&kp LS(SQT)', keyPositions:[10,11], layers:[]});
-    t('環境で変わるコンボを指摘する', has(C.runValidation(st,['win']),'別の入力になります'));
+    t('利用環境で変わるコンボを指摘する', has(C.runValidation(st,['win']),'別の入力になります'));
   }
   {
     const st = base();
@@ -1929,7 +2199,7 @@ section('整合性チェック');
     st.behaviors.morphs.push({name:'q', b1:'&kp SQT', b2:'&kp DQT', mods:[], keepMods:[]});
     st.layers[0].bindings[0] = '&q';
     st.layers[2].bindings[0] = '&q';
-    t('環境で変わる自作定義を指摘する', has(C.runValidation(st,['win']),'別の入力になります'));
+    t('利用環境で変わる自作定義を指摘する', has(C.runValidation(st,['win']),'別の入力になります'));
   }
   // 指摘は文章として読める形で返る
   {
@@ -1968,7 +2238,7 @@ section('壊れた入力への耐性');
     catch(e){ ok = false; }
     t('付随するパーサも落ちない: '+JSON.stringify(x.slice(0,12)), ok);
   });
-  t('正しいkeymapはエラーを返さない', !C.parseKeymap(C.DEFAULT_KEYMAP).error);
+  t('正しいkeymapはエラーを返さない', !C.parseKeymap(SAMPLE || C.DEFAULT_KEYMAP).error);
 
   // 状態が欠けていても整合性チェックが落ちない
   {
@@ -1985,7 +2255,7 @@ section('全配列の往復');
   /* 配列変換は「変換して戻したら元どおり」が成り立たないと信用できない。
      US⇄JIS と同じ水準で、他の配列も全キーで確かめる。 */
   const locales = C.LOCALE_LIST.map(l=>l.id);
-  t('対応配列が5種類ある', locales.length===5, locales.join(','));
+  t('対応配列が4種類ある', locales.length===4, locales.join(','));
 
   locales.forEach(a=>locales.forEach(b=>{
     if(a===b) return;
@@ -2012,7 +2282,7 @@ section('全配列の往復');
 
   // 変換先に無い文字は、壊さずに警告で知らせる
   {
-    const r = C.convBindingLocale('&kp LS(N2)', 'us', 'dvorak', false, null);
+    const r = C.convBindingLocale('&kp LS(N2)', 'us', 'de', false, null);
     t('変換できない場合もキーを壊さない', /^&kp /.test(r.raw) && !/undefined|NaN/.test(r.raw), r.raw);
   }
   // 文字テーブルの体裁
@@ -2029,7 +2299,7 @@ section('全配列の往復');
   /* 同じ文字を出すキーが複数あるのは正常。JIS配列のキーボードには US には無いキー
      (INT1 / INT3 / NUHS)があり、US の表ではそれらが既存キーと同じ文字を指す。
      ここでは「意図せず増えていないか」だけを見る。 */
-  const dupCount = {us:5, jis:2, uk:2, de:0, dvorak:0};
+  const dupCount = {us:5, jis:2, uk:2, de:0};
   locales.forEach(id=>{
     const seen = {}, dup = [];
     Object.entries(C.LOCALE_CHARS[id]).forEach(([kc, v])=>{
@@ -2054,7 +2324,8 @@ t('公開版デフォルト(個人設定を含まない)', C.DEFAULT_KEYMAP.incl
   const hits = personal.filter(w => new RegExp(w, 'i').test(html));
   t('個人を特定する文字列が入っていない', hits.length === 0, hits.join(','));
   const hosts = [...new Set([...html.matchAll(/https?:\/\/([a-z0-9.-]+)/gi)].map(m => m[1].toLowerCase()))];
-  const allowed = ['api.github.com','github.com','zmk.dev','zmk.studio','www.w3.org','cdnjs.cloudflare.com'];
+  const allowed = ['api.github.com','raw.githubusercontent.com','github.com',
+                   'zmk.dev','zmk.studio','www.w3.org','cdnjs.cloudflare.com'];
   t('通信先が想定どおり(GitHub APIと公式ドキュメントのみ)',
     hosts.every(h => allowed.includes(h)), hosts.filter(h => !allowed.includes(h)).join(','));
 }

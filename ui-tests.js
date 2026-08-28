@@ -126,8 +126,8 @@ section('Undo / Redo');
   t('コンボの追加もUndoできる', S().combos.length === n0, `${S().combos.length} vs ${n0}`);
 }
 
-/* ---------- 環境の追加ウィザード ---------- */
-section('環境の追加ウィザード');
+/* ---------- 利用環境の追加ウィザード ---------- */
+section('利用環境の追加ウィザード');
 {
   const layers0 = S().layers.length, groups0 = S().groups.length;
   w.addGroupFlow();
@@ -136,7 +136,7 @@ section('環境の追加ウィザード');
     [...w.document.getElementById('ae-loc').options].some(o => o.value === ''));
   t('OSの選択肢にiOSがある',
     [...w.document.getElementById('ae-os').options].some(o => o.value === 'ios'));
-  t('コピー元に既存の環境が並ぶ', w.document.getElementById('ae-src').options.length === groups0,
+  t('コピー元に既存の利用環境が並ぶ', w.document.getElementById('ae-src').options.length === groups0,
     String(w.document.getElementById('ae-src').options.length));
 
   // 名前を空のまま作ろうとすると断られる
@@ -150,7 +150,7 @@ section('環境の追加ウィザード');
   click(w, 'ae-create');
   t('同じ名前だと作れない', S().groups.length === groups0);
 
-  // JIS環境を作る
+  // JIS利用環境を作る
   w.document.getElementById('ae-name').value = 'JISTEST';
   setVal(w, 'ae-loc', 'jis');
   setVal(w, 'ae-os', 'win');
@@ -159,7 +159,7 @@ section('環境の追加ウィザード');
   w.document.getElementById('ae-src').value = '0';
   click(w, 'ae-create');
 
-  t('環境が増える', S().groups.length === groups0 + 1, String(S().groups.length));
+  t('利用環境が増える', S().groups.length === groups0 + 1, String(S().groups.length));
   t('ウィザードが閉じる', !w.document.getElementById('addenv-bg').classList.contains('open'));
   const g = S().groups[S().groups.length - 1];
   t('名前が入る', g.name === 'JISTEST', g.name);
@@ -181,8 +181,8 @@ section('環境の追加ウィザード');
     })));
 }
 
-/* ---------- 環境の設定チップ ---------- */
-section('環境の設定');
+/* ---------- 利用環境の設定チップ ---------- */
+section('利用環境の設定');
 {
   const gi = S().groups.length - 1;
   const chips = [...w.document.querySelectorAll('#layerbar .envchip')];
@@ -236,28 +236,32 @@ section('レイヤーの操作');
     })));
 }
 
-/* ---------- コンボと環境 ---------- */
-section('コンボの環境別対応');
+/* ---------- コンボと利用環境 ---------- */
+section('コンボの利用環境別対応');
 {
+  // 既定のキーマップは素直な2レイヤーなので、基準側の配列を明示しておく
+  S().groups[0].locale = 'us';
+  S().groups[0].platform = 'win';
+  w.renderAll();
   S().combos.push({ name: 'dq_test', binding: '&kp LS(SQT)', keyPositions: [20, 21], layers: [], timeout: 50 });
   w.renderCombos();
   const box = w.document.getElementById('combo-envwarn');
-  t('環境依存のコンボが知らされる', box.textContent.includes('環境'), box.textContent.slice(0, 60));
-  const btn = [...box.querySelectorAll('button')].find(b => b.textContent.includes('環境ごとに分ける'));
+  t('利用環境依存のコンボが知らされる', box.textContent.includes('利用環境'), box.textContent.slice(0, 60));
+  const btn = [...box.querySelectorAll('button')].find(b => b.textContent.includes('利用環境ごとに分ける'));
   t('分割ボタンが出る', !!btn);
   if (btn) {
     const n0 = S().combos.length;
     btn.dispatchEvent(new w.Event('click', { bubbles: true }));
     t('分割でコンボが増える', S().combos.length > n0, `${S().combos.length} vs ${n0}`);
-    t('分割後は警告が消える', !w.document.getElementById('combo-envwarn').textContent.includes('環境ごとに'),
+    t('分割後は警告が消える', !w.document.getElementById('combo-envwarn').textContent.includes('利用環境ごとに'),
       w.document.getElementById('combo-envwarn').textContent.slice(0, 40));
     t('分割したコンボにlayers指定が入る',
       S().combos.filter(c => c.name.startsWith('dq_test_')).every(c => c.layers && c.layers.length > 0));
   }
 }
 
-/* ---------- マクロ等の環境別対応 ---------- */
-section('マクロ等の環境別対応');
+/* ---------- マクロ等の利用環境別対応 ---------- */
+section('マクロ等の利用環境別対応');
 {
   S().behaviors.morphs.push({ name: 'ui_morph', b1: '&kp SQT', b2: '&kp DQT', mods: ['MOD_LSFT'], keepMods: [] });
   const rs = w.groupRanges(S().groups);
@@ -266,8 +270,8 @@ section('マクロ等の環境別対応');
   S().layers[last.start].bindings[5] = '&ui_morph';
   w.renderBehs();
   const box = w.document.getElementById('bm-envwarn');
-  t('環境依存の自作定義が知らされる', box.textContent.includes('ui_morph'), box.textContent.slice(0, 80));
-  const btn = [...box.querySelectorAll('button')].find(b => b.textContent.includes('環境ごとに分ける'));
+  t('利用環境依存の自作定義が知らされる', box.textContent.includes('ui_morph'), box.textContent.slice(0, 80));
+  const btn = [...box.querySelectorAll('button')].find(b => b.textContent.includes('利用環境ごとに分ける'));
   t('分割ボタンが出る', !!btn);
   if (btn) {
     btn.dispatchEvent(new w.Event('click', { bubbles: true }));
@@ -275,8 +279,8 @@ section('マクロ等の環境別対応');
       S().behaviors.morphs.map(m => m.name).join(','));
     t('参照先が差し替わる', /^&ui_morph_/.test(S().layers[last.start].bindings[5]),
       S().layers[last.start].bindings[5]);
-    t('基準環境の参照は変わらない', S().layers[rs[0].start].bindings[5] === '&ui_morph');
-    t('分割後は警告が消える', !w.document.getElementById('bm-envwarn').textContent.includes('環境ごとに'));
+    t('基準利用環境の参照は変わらない', S().layers[rs[0].start].bindings[5] === '&ui_morph');
+    t('分割後は警告が消える', !w.document.getElementById('bm-envwarn').textContent.includes('利用環境ごとに'));
   }
 }
 
@@ -287,7 +291,7 @@ section('OS別のキー表示');
   const rs = w.groupRanges(st.groups);
   const set = ['&kp LALT', '&kp LGUI', '&kp LCTRL', '&kp LC(C)', '&kp LC(LS(T))',
     '&kp DEL', '&kp LS(N2)', '&kp A', '&kp LC(T)'];
-  // 先頭の環境をWindows、末尾の環境をmacOSにして見比べる
+  // 先頭の利用環境をWindows、末尾の利用環境をmacOSにして見比べる
   // OSの違いだけを見たいので、配列は両方そろえる
   const first = 0, last = rs.length - 1;
   st.groups[first].locale = 'us'; st.groups[first].platform = 'win';
@@ -303,10 +307,10 @@ section('OS別のキー表示');
   w.eval('activeLayer=' + rs[last].start); w.renderAll();
   const macFace = read();
 
-  t('Windows環境では Alt と出る', winFace[0] === 'Alt', winFace[0]);
-  t('macOS環境では ⌥ と出る', macFace[0] === '⌥', macFace[0]);
-  t('Windows環境では Win と出る', winFace[1] === 'Win', winFace[1]);
-  t('macOS環境では ⌘ と出る', macFace[1] === '⌘', macFace[1]);
+  t('Windows利用環境では Alt と出る', winFace[0] === 'Alt', winFace[0]);
+  t('macOS利用環境では ⌥ と出る', macFace[0] === '⌥', macFace[0]);
+  t('Windows利用環境では Win と出る', winFace[1] === 'Win', winFace[1]);
+  t('macOS利用環境では ⌘ と出る', macFace[1] === '⌘', macFace[1]);
   t('Ctrl の表示も変わる', winFace[2] === 'Ctrl' && macFace[2] === '⌃', winFace[2] + ' / ' + macFace[2]);
   t('修飾ラッパの表示も変わる', winFace[3] === '^C' && macFace[3] === '⌃C', winFace[3] + ' / ' + macFace[3]);
   t('Del の表示も変わる', winFace[5] === 'Del' && macFace[5] === '⌦', winFace[5] + ' / ' + macFace[5]);
@@ -327,6 +331,134 @@ section('OS別のキー表示');
   st.groups[last].platform = null; w.renderAll();
   t('OS未設定はWindowsと同じ表記',
     [...w.document.querySelectorAll('#board .key')][0].textContent.trim() === 'Alt');
+}
+
+/* ---------- 内蔵キーボード ---------- */
+section('内蔵キーボード');
+{
+  w.renderKbModal();
+  const rows = [...w.document.querySelectorAll('#kb-list .listrow')];
+  const builtins = ev('BUILTIN_PROFILES');
+  t('一覧に内蔵プロファイルが並ぶ', rows.length >= builtins.length,
+    `${rows.length} vs ${builtins.length}`);
+  t('roBa以外も出る', rows.some(r => r.textContent.includes('Corne')),
+    rows.map(r => r.textContent.slice(0, 10)).join(' / '));
+  const corne = rows.find(r => r.textContent.includes('Corne (6列)'));
+  t('Corneの行がある', !!corne);
+  t('キー数が表示される', corne.textContent.includes('42'), corne.textContent.slice(0, 30));
+  t('補足が表示される', corne.textContent.includes('crkbd'), corne.textContent.slice(0, 40));
+  t('既定のHHKBが先頭', rows[0].textContent.includes('HHKB'), rows[0].textContent.slice(0, 20));
+
+  // 別のキーボードで新規作成して、そのまま書き出せるか
+  const before = ev('state.keyboard.id');
+  const target = builtins.find(p => p.id === 'lily58');
+  w.newDocWith(target);
+  t('キーボードを切り替えられる', ev('state.keyboard.id') === 'lily58', ev('state.keyboard.id'));
+  t('盤面のキー数が合う', w.document.querySelectorAll('#board .key').length === 58,
+    String(w.document.querySelectorAll('#board .key').length));
+  t('レイヤーのキー数も合う', ev('state.layers[0].bindings.length') === 58);
+  S().layers[0].bindings[0] = '&kp A';
+  const out = w.generateKeymap(S());
+  t('切り替え後も書き出せる', out.includes('&kp A'));
+  t('書き出しを読み直せる', w.parseKeymap(out).layers[0].bindings.length === 58);
+  t('切り替えでエラーが出ない', !(w.__alerts || []).length, (w.__alerts || []).join(' / '));
+
+  // 元に戻す(後続のテストに影響させない)
+  w.newDocWith(builtins.find(p => p.id === before) || builtins[0]);
+  t('元のキーボードに戻せる', ev('state.keyboard.id') === before, ev('state.keyboard.id'));
+}
+
+/* ---------- レイアウトの取り込み ---------- */
+section('レイアウトの取り込み');
+{
+  // 通信はせず、取得後の描画と追加だけを確かめる
+  const found = [
+    { path: 'app/dts/layouts/x/tkl.dtsi', node: 'tkl', name: 'TKL 87 Key ANSI', keyCount: 3,
+      keys: [[100,100,0,0,0,0,0],[100,100,100,0,0,0,0],[200,100,200,0,0,0,0]] },
+    { path: 'app/dts/layouts/x/pad.dtsi', node: 'pad', name: '17 Key Numpad', keyCount: 2,
+      keys: [[100,100,0,0,0,0,0],[100,200,100,0,0,0,0]] }
+  ];
+  w.renderKbFound(found, 5);
+  const box = w.document.getElementById('kb-repo-result');
+  t('見つかった数が出る', box.textContent.includes('2 件'), box.textContent.slice(0, 40));
+  t('調べ残しも知らせる', box.textContent.includes('5 件'), box.textContent.slice(0, 60));
+  const rows = [...box.querySelectorAll('.listrow')];
+  t('一覧に並ぶ', rows.length === 2, String(rows.length));
+  t('名前が出る', rows[0].textContent.includes('TKL 87 Key ANSI'));
+  t('キー数が出る', rows[0].textContent.includes('3キー'));
+  t('取得元のパスが出る', rows[0].textContent.includes('tkl.dtsi'));
+
+  const n0 = w.kbLibLoad().length;
+  [...rows[0].querySelectorAll('button')].find(b => b.textContent === '追加')
+    .dispatchEvent(new w.Event('click', { bubbles: true }));
+  const lib = w.kbLibLoad();
+  t('追加できる', lib.length === n0 + 1, `${lib.length} vs ${n0 + 1}`);
+  const added = lib[lib.length - 1];
+  t('名前と座標が入る', added.name === 'TKL 87 Key ANSI' && added.keys.length === 3, added.name);
+  t('行構成が導かれる', Array.isArray(added.rows) && added.rows.length > 0);
+  t('1U以外の幅も保たれる', added.keys[2][0] === 200, String(added.keys[2][0]));
+  t('一覧に反映される',
+    [...w.document.querySelectorAll('#kb-list .listrow')].some(r => r.textContent.includes('TKL 87 Key ANSI')));
+
+  // 同じものをもう一度追加しても名前がぶつからない
+  w.renderKbFound(found, 0);
+  [...w.document.querySelectorAll('#kb-repo-result .listrow')][0]
+    .querySelector('button').dispatchEvent(new w.Event('click', { bubbles: true }));
+  const lib2 = w.kbLibLoad();
+  t('重ねて追加しても名前が重複しない',
+    new Set(lib2.map(x => x.name)).size === lib2.length, lib2.map(x => x.name).join(','));
+  t('idも重複しない', new Set(lib2.map(x => x.id)).size === lib2.length);
+  t('エラーが出ない', !(w.__alerts || []).length, (w.__alerts || []).join(' / '));
+}
+
+/* ---------- キーの大きさの編集 ---------- */
+section('キーの大きさの編集');
+{
+  const hh = ev('BUILTIN_PROFILES')[0];
+  w.openKbEditor(hh);
+  t('編集画面が開く', w.document.getElementById('kbedit-bg').classList.contains('open'));
+  const keys = [...w.document.querySelectorAll('#kbe-board .mkey')];
+  t('盤面が描かれる', keys.length === hh.keyCount, `${keys.length} vs ${hh.keyCount}`);
+  t('選択前は入力が使えない', w.document.getElementById('kbe-w').disabled);
+
+  keys[1].dispatchEvent(new w.Event('click', { bubbles: true }));
+  t('クリックで選べる', txt(w, 'kbe-sel') === 'pos 1', txt(w, 'kbe-sel'));
+  t('今の幅が入る', w.document.getElementById('kbe-w').value === '1', w.document.getElementById('kbe-w').value);
+
+  const preset = [...w.document.querySelectorAll('.kbe-preset')].find(e => e.dataset.w === '2.25');
+  preset.dispatchEvent(new w.Event('click', { bubbles: true }));
+  t('よく使う幅を押すと反映される', w.document.getElementById('kbe-w').value === '2.25');
+  t('重なりが出ない(後ろがずれる)', txt(w, 'kbe-warn') === '', txt(w, 'kbe-warn').slice(0, 40));
+
+  const libBefore = w.kbLibLoad().length;
+  const bindingsBefore = JSON.stringify(S().layers.map(l => l.bindings));
+  w.document.getElementById('kbe-save').dispatchEvent(new w.Event('click', { bubbles: true }));
+  const lib = w.kbLibLoad();
+  t('複製として保存される', lib.length === libBefore + 1, `${lib.length} vs ${libBefore + 1}`);
+  t('保存した幅が残る', lib[lib.length - 1].keys[1][0] === 225, String(lib[lib.length - 1].keys[1][0]));
+  t('内蔵プロファイルは変わらない', ev('BUILTIN_PROFILES')[0].keys[1][0] === 100);
+  t('キーの割り当ては変わらない',
+    JSON.stringify(S().layers.map(l => l.bindings)) === bindingsBefore);
+  t('編集画面が閉じる', !w.document.getElementById('kbedit-bg').classList.contains('open'));
+
+  // 自分のプロファイルを編集する場合は、複製せずその場で書き換わる
+  {
+    const mine = lib[lib.length - 1];
+    const n0 = w.kbLibLoad().length;
+    w.openKbEditor(mine);
+    [...w.document.querySelectorAll('#kbe-board .mkey')][2]
+      .dispatchEvent(new w.Event('click', { bubbles: true }));
+    const p15 = [...w.document.querySelectorAll('.kbe-preset')].find(e => e.dataset.w === '1.5');
+    p15.dispatchEvent(new w.Event('click', { bubbles: true }));
+    w.document.getElementById('kbe-save').dispatchEvent(new w.Event('click', { bubbles: true }));
+    const after = w.kbLibLoad();
+    t('自分のものは複製されない', after.length === n0, `${after.length} vs ${n0}`);
+    t('その場で書き換わる', after[after.length - 1].keys[2][0] === 150,
+      String(after[after.length - 1].keys[2][0]));
+    t('前回の編集も残っている', after[after.length - 1].keys[1][0] === 225,
+      String(after[after.length - 1].keys[1][0]));
+  }
+  t('エラーが出ない', !(w.__alerts || []).length, (w.__alerts || []).join(' / '));
 }
 
 /* ---------- 書き出しと読み直し ---------- */

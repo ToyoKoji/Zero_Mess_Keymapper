@@ -16,8 +16,8 @@
                    「ノード単位の置換」で行い、未知の記述を保全する。
     layers[]     : {name(表示名), bindings[キー数], sensor, shiftLayer}
     groups[]     : {name, count, color?, locale?, platform?, shared?}
-                   レイヤーの連続区間を「環境」または「共有レイヤー」として
-                   分割する。環境 = キーボード配列(locale) × OS(platform)。
+                   レイヤーの連続区間を「利用環境」または「共有レイヤー」として
+                   分割する。利用環境 = キーボード配列(locale) × OS(platform)。
                    fw番号=配列添字。表示はグループ内番号(US_01等)。
                    書き出し時ノード名 = <グループ>_<番号>_<表示名>(一意)。
     combos/behaviors{morphs,tds,hts,raws}/macros{items,raws}/condLayers
@@ -31,7 +31,7 @@
   ■ 変換エンジン(2系統):
     1) 配列変換 convBindingLocale(from,to)
        キーコード→「その配列で出る文字」→変換先で同じ文字を出すキーコード。
-       文字テーブルは LOCALE_CHARS(us/ansi/jis/uk/de/dvorak)。
+       文字テーブルは LOCALE_CHARS(us/ansi/jis/uk/de)。
        Shift両面が1キーで揃わない場合は mod-morph(loc_<to>_<key>)を生成。
        配列を増やすときは LOCALE_CHARS と LOCALE_LIST に追加するだけでよい。
        ※ US⇄JIS だけは実績のある専用実装(convBinding/convBindingUs)も残す。
@@ -52,13 +52,13 @@
     盤面描画/コンボ位置/チートシートはすべて KEYBOARD.keys を参照。
 
   ■ レイヤー順序の制約(ZMK仕様): レイヤー0は常に有効で、番号が大きい
-    レイヤーが優先される。したがって共有レイヤーは全ての環境より後ろに
+    レイヤーが優先される。したがって共有レイヤーは全ての利用環境より後ろに
     置く必要がある。findShadowedRefs()/findBaseTransIssues() で検査する。
     グループに「共有」という種別は設けず、配列とOSを「設定なし」にしたものが
     実質的に共通レイヤーとして機能する(変換の対象外になるため)。
 
   ■ 命名規則: ZMK公式機能=英語(Combo/Macro等)、ツール独自概念=日本語。
-    利用者向けの概念は「環境」「共有レイヤー」「同期」で統一する。
+    利用者向けの概念は「利用環境」「共有レイヤー」「同期」で統一する。
 ===================================================================== -->
 <style>
 :root{
@@ -324,8 +324,8 @@ label.chk{display:flex;gap:5px;align-items:center;font-size:12.5px;color:var(--t
 <div id="toolbar2"><div id="toolwrap">
   <div class="trow"><span class="tlabel" title="選択中のレイヤーに対する設定">レイヤー</span>
     <button id="btn-shiftlayer" title="このレイヤーでShiftを押しながらの文字入力(記号打ち)を使うかどうか。「有効」のレイヤーだけJIS変換でmod-morphを生成し、キー右上にShift面の記号を表示します。ショートカットの修飾同時押しには影響しません">⇧ Shift入力: 無効</button>
-    <button id="btn-switcher" title="実機で環境を切り替えるキーを配置します。Bluetoothプロファイルの切替も任意で併用できます">⇥ 切り替えキーを配置</button>
-    <button id="btn-platform" title="ベースにした環境の配置を、別の環境(キーボード配列 × OS)向けに変換して同期します">⇆ 環境間の同期</button>
+    <button id="btn-switcher" title="実機で利用環境を切り替えるキーを配置します。Bluetoothプロファイルの切替も任意で併用できます">⇥ 切り替えキーを配置</button>
+    <button id="btn-platform" title="ベースにした利用環境の配置を、別の利用環境(キーボード配列 × OS)向けに変換して同期します">⇆ 利用環境間の同期</button>
   </div>
   <div class="trow"><span class="tlabel" title="マッピングツール上の表示設定(ファームウェアには影響しません)">表示切り替え</span>
     <button id="btn-combo-ov" title="盤面に、このレイヤーで有効なComboを重ねて表示します">⊞ Combo表示: OFF</button>
@@ -675,11 +675,55 @@ label.chk{display:flex;gap:5px;align-items:center;font-size:12.5px;color:var(--t
         <span class="hint" style="margin:0">zmk,physical-layout(key_physical_attrs)を含む .dtsi / .overlay など</span>
       </div>
       <div class="mrow">
+        <label>GitHubから探す:</label>
+        <input type="text" id="kb-repo" style="max-width:230px" value="zmkfirmware/zmk">
+        <button id="kb-repo-find">レイアウトを探す</button>
+        <span class="hint" style="margin:0">ZMK公式のほか、自分のzmk-configも指定できます</span>
+      </div>
+      <div id="kb-repo-result"></div>
+      <div class="mrow">
         <label>または簡易グリッドで作成 — キー数:</label><input type="text" id="kb-grid-count" class="num" placeholder="42">
         <button id="kb-grid-add">＋ グリッド生成</button>
       </div>
     </div>
     <div class="hint">「使用」でキー数が異なる場合、不足は▽(透過)で埋め、超過は末尾から削られます。トラックボール設定は対応キーボード(roBa)でのみ表示されます。名前はダブルクリックで変更できます。</div>
+  </div>
+</div>
+
+<!-- layout editor modal -->
+<div class="modal-bg" id="kbedit-bg">
+  <div class="modal" style="width:min(980px,96vw)">
+    <button class="close" onclick="closeModal('kbedit-bg')">✕ 閉じる</button>
+    <h2>キーの大きさと位置<span class="qh" data-tip="1Uでないキー(2Uのバックスペース、6.25Uのスペースなど)に合わせて盤面を整えます。単位は 1U = キー1個分です。">?</span> <small id="kbe-name">-</small></h2>
+    <div class="hint" style="margin:0 0 8px">キーをクリックして選び、大きさや位置を変えます。<b>キーの割り当ては変わりません</b>（見た目の形だけ）。</div>
+    <div style="display:flex;justify-content:center;padding:4px 0"><div id="kbe-board" style="position:relative"></div></div>
+    <div class="mrow">
+      <label>選択中:</label><b id="kbe-sel">なし</b>
+      <label>幅(U):</label><input type="text" id="kbe-w" class="num" style="width:64px">
+      <label>高さ(U):</label><input type="text" id="kbe-h" class="num" style="width:64px">
+      <span class="hint" style="margin:0">よく使う幅:</span>
+      <span class="modcheck kbe-preset" data-w="1">1</span>
+      <span class="modcheck kbe-preset" data-w="1.25">1.25</span>
+      <span class="modcheck kbe-preset" data-w="1.5">1.5</span>
+      <span class="modcheck kbe-preset" data-w="1.75">1.75</span>
+      <span class="modcheck kbe-preset" data-w="2">2</span>
+      <span class="modcheck kbe-preset" data-w="2.25">2.25</span>
+      <span class="modcheck kbe-preset" data-w="2.75">2.75</span>
+      <span class="modcheck kbe-preset" data-w="6.25">6.25</span>
+      <span class="modcheck kbe-preset" data-w="7">7</span>
+    </div>
+    <div class="mrow">
+      <label>位置 X(U):</label><input type="text" id="kbe-x" class="num" style="width:64px">
+      <label>Y(U):</label><input type="text" id="kbe-y" class="num" style="width:64px">
+      <label class="chk"><input type="checkbox" id="kbe-push" checked>大きさを変えたら同じ行の後ろをずらす</label>
+      <button id="kbe-pack">この行を詰め直す</button>
+    </div>
+    <div id="kbe-warn" class="hint" style="margin:0 0 8px"></div>
+    <div class="mrow">
+      <button class="primary" id="kbe-save">保存</button>
+      <button onclick="closeModal('kbedit-bg')">キャンセル</button>
+      <span class="hint" style="margin:0">保存すると自分のプロファイルとして残ります</span>
+    </div>
   </div>
 </div>
 
@@ -706,7 +750,7 @@ label.chk{display:flex;gap:5px;align-items:center;font-size:12.5px;color:var(--t
 <div class="modal-bg" id="envset-bg">
   <div class="modal" style="width:min(560px,96vw)">
     <button class="close" onclick="closeModal('envset-bg')">✕ 閉じる</button>
-    <h2>環境の設定<span class="qh" data-tip="この環境で使うOS側のキーボード配列と、OSそのものです。どちらも「設定なし」にすると変換の対象外になり、どの環境からも呼び出す共通の層として使えます。">?</span> <small id="es-name">-</small></h2>
+    <h2>利用環境の設定<span class="qh" data-tip="この利用環境で使うOS側のキーボード配列と、OSそのものです。どちらも「設定なし」にすると変換の対象外になり、どの利用環境からも呼び出す共通の層として使えます。">?</span> <small id="es-name">-</small></h2>
     <div class="mrow">
       <label>キーボード配列:</label><select id="es-loc"></select>
       <label>OS:</label><select id="es-os"></select>
@@ -715,7 +759,7 @@ label.chk{display:flex;gap:5px;align-items:center;font-size:12.5px;color:var(--t
     <div class="mrow">
       <button class="primary" id="es-save">保存</button>
       <button onclick="closeModal('envset-bg')">キャンセル</button>
-      <span class="hint" style="margin:0">配置は変わりません。他の環境に反映するには「⇆ 環境間の同期」を使ってください</span>
+      <span class="hint" style="margin:0">配置は変わりません。他の利用環境に反映するには「⇆ 利用環境間の同期」を使ってください</span>
     </div>
   </div>
 </div>
@@ -724,7 +768,7 @@ label.chk{display:flex;gap:5px;align-items:center;font-size:12.5px;color:var(--t
 <div class="modal-bg" id="addenv-bg">
   <div class="modal" style="width:min(680px,96vw)">
     <button class="close" onclick="closeModal('addenv-bg')">✕ 閉じる</button>
-    <h2>環境を追加<span class="qh" data-tip="別のキーボード配列やOS向けのレイヤー一式を作ります。コピー元を指定すると、その配置を変換したものが最初から入った状態で作られます。">?</span> <small>別の機種で同じ操作感にする</small></h2>
+    <h2>利用環境を追加<span class="qh" data-tip="別のキーボード配列やOS向けのレイヤー一式を作ります。コピー元を指定すると、その配置を変換したものが最初から入った状態で作られます。">?</span> <small>別の機種で同じ操作感にする</small></h2>
     <div class="mrow">
       <label>名前:</label><input type="text" id="ae-name" style="max-width:160px" placeholder="MAC">
       <span class="hint" style="margin:0">半角英字。例: MAC / IPAD / WIN</span>
@@ -732,11 +776,11 @@ label.chk{display:flex;gap:5px;align-items:center;font-size:12.5px;color:var(--t
     <div class="mrow">
       <label>キーボード配列:</label><select id="ae-loc"></select>
       <label>OS:</label><select id="ae-os"></select>
-      <span class="qh" data-tip="この環境で使うOS側のキーボード設定と、OSそのものです。どちらも「設定なし」にすると変換の対象外になり、どの環境からも呼び出す共通の層として使えます。">?</span>
+      <span class="qh" data-tip="この利用環境で使うOS側のキーボード設定と、OSそのものです。どちらも「設定なし」にすると変換の対象外になり、どの利用環境からも呼び出す共通の層として使えます。">?</span>
     </div>
     <div class="formbox">
       <div class="mrow" style="margin-bottom:4px">
-        <label class="chk"><input type="checkbox" id="ae-copy" checked>既存の環境から配置をコピーして変換する</label>
+        <label class="chk"><input type="checkbox" id="ae-copy" checked>既存の利用環境から配置をコピーして変換する</label>
       </div>
       <div class="mrow" id="ae-copyrow">
         <label>コピー元:</label><select id="ae-src"></select>
@@ -755,14 +799,14 @@ label.chk{display:flex;gap:5px;align-items:center;font-size:12.5px;color:var(--t
 <div class="modal-bg" id="sw-bg">
   <div class="modal" style="width:min(880px,96vw)">
     <button class="close" onclick="closeModal('sw-bg')">✕ 閉じる</button>
-    <h2>環境切り替えキーの配置<span class="qh" data-tip="実機で環境を切り替えるためのキーを盤面に置きます。ZMKの &to は「そのレイヤーに移動して、他のレイヤーを解除する」動作なので、環境の切り替えに使えます。">?</span> <small>実機で使う環境を切り替える</small></h2>
+    <h2>利用環境切り替えキーの配置<span class="qh" data-tip="実機で利用環境を切り替えるためのキーを盤面に置きます。ZMKの &to は「そのレイヤーに移動して、他のレイヤーを解除する」動作なので、利用環境の切り替えに使えます。">?</span> <small>実機で使う利用環境を切り替える</small></h2>
     <div class="mrow">
       <label>配置先レイヤー:</label><select id="sw-layer"></select>
-      <span class="hint" style="margin:0">どの環境からも押せるレイヤーを選んでください</span>
+      <span class="hint" style="margin:0">どの利用環境からも押せるレイヤーを選んでください</span>
     </div>
     <div class="mrow">
       <label class="chk"><input type="checkbox" id="sw-bt">Bluetoothプロファイルも一緒に切り替える</label>
-      <span class="qh" data-tip="環境ごとに接続先の機器が違う場合に便利です。有線だけで使う場合や、同じ機器で環境を使い分ける場合はオフのままにしてください（レイヤーの切り替えだけを行います）。">?</span>
+      <span class="qh" data-tip="利用環境ごとに接続先の機器が違う場合に便利です。有線だけで使う場合や、同じ機器で利用環境を使い分ける場合はオフのままにしてください（レイヤーの切り替えだけを行います）。">?</span>
     </div>
     <div id="sw-assign"></div>
     <div class="catlabel">キーの位置（クリックで選択）</div>
@@ -772,7 +816,7 @@ label.chk{display:flex;gap:5px;align-items:center;font-size:12.5px;color:var(--t
       <button id="sw-cancel">キャンセル</button>
       <span class="hint" id="sw-msg" style="margin:0"></span>
     </div>
-    <div class="hint">電源を入れ直すと最初の環境に戻ります。よく使う環境を一番上に置いておくと扱いやすくなります。</div>
+    <div class="hint">電源を入れ直すと最初の利用環境に戻ります。よく使う利用環境を一番上に置いておくと扱いやすくなります。</div>
   </div>
 </div>
 
@@ -780,10 +824,10 @@ label.chk{display:flex;gap:5px;align-items:center;font-size:12.5px;color:var(--t
 <div class="modal-bg" id="order-bg">
   <div class="modal" style="width:min(820px,96vw)">
     <button class="close" onclick="closeModal('order-bg')">✕ 閉じる</button>
-    <h2>レイヤー順序の点検<span class="qh" data-tip="ZMKでは「レイヤー0は常に有効」「番号が大きいレイヤーが優先」というルールがあります。これに反する並びだと、環境を切り替えたときに共有レイヤーが効かなくなります。">?</span> <small>環境を切り替えても正しく動くか</small></h2>
+    <h2>レイヤー順序の点検<span class="qh" data-tip="ZMKでは「レイヤー0は常に有効」「番号が大きいレイヤーが優先」というルールがあります。これに反する並びだと、利用環境を切り替えたときに共有レイヤーが効かなくなります。">?</span> <small>利用環境を切り替えても正しく動くか</small></h2>
     <div class="htxt" style="margin-bottom:10px">
 ZMKでは<b>レイヤー0が常に有効</b>で、押されたキーは<b>有効なレイヤーのうち最も番号が大きいもの</b>が使われます。<br><br>
-そのため、あるレイヤーから<b>自分より前（番号が小さい）レイヤーを呼び出しても無視されます</b>。複数の環境を切り替えて使う場合、どの環境からも呼び出したいレイヤー（マウスやBluetoothなど）は、<b>すべての環境より後ろ</b>に置いてください。
+そのため、あるレイヤーから<b>自分より前（番号が小さい）レイヤーを呼び出しても無視されます</b>。複数の利用環境を切り替えて使う場合、どの利用環境からも呼び出したいレイヤー（マウスやBluetoothなど）は、<b>すべての利用環境より後ろ</b>に置いてください。
     </div>
     <div id="order-list"></div>
     <div class="mrow" id="order-actions" style="display:none">
@@ -811,24 +855,24 @@ ZMKでは<b>レイヤー0が常に有効</b>で、押されたキーは<b>有効
 <div class="modal-bg" id="plat-bg">
   <div class="modal" style="width:min(860px,96vw)">
     <button class="close" onclick="closeModal('plat-bg')">✕ 閉じる</button>
-    <h2>環境間の同期<span class="qh" data-tip="ベースにする環境の配置を、別の環境(キーボード配列 × OS)向けに作り直します。配列とOSの両方が違う場合は同時に変換するので、どの環境でも同じ操作感になります。">?</span> <small>同じ操作感を別の環境で再現する</small></h2>
+    <h2>利用環境間の同期<span class="qh" data-tip="ベースにする利用環境の配置を、別の利用環境(キーボード配列 × OS)向けに作り直します。配列とOSの両方が違う場合は同時に変換するので、どの利用環境でも同じ操作感になります。">?</span> <small>同じ操作感を別の利用環境で再現する</small></h2>
     <div class="mrow">
-      <label>基準にする環境:</label><select id="plat-src"></select>
-      <label>合わせる環境:</label><select id="plat-dst"></select>
+      <label>基準にする利用環境:</label><select id="plat-src"></select>
+      <label>合わせる利用環境:</label><select id="plat-dst"></select>
     </div>
     <div class="mrow">
-      <span class="dimtxt">基準の環境:</span>
+      <span class="dimtxt">基準の利用環境:</span>
       <label>キーボード配列:</label><select id="plat-src-loc"></select>
       <label>OS:</label><select id="plat-src-os"></select>
     </div>
     <div class="mrow">
-      <span class="dimtxt">合わせる環境:</span>
+      <span class="dimtxt">合わせる利用環境:</span>
       <label>キーボード配列:</label><select id="plat-dst-loc"></select>
       <label>OS:</label><select id="plat-dst-os"></select>
     </div>
     <div class="mrow">
       <button id="plat-scan" class="primary">差分を確認</button>
-      <span class="hint" style="margin:0">「合わせる環境」の中身が置き換わります。<br>レイヤー切替（&amp;mo / &amp;lt）は同期先の対応するレイヤーへ自動で付け替わります。環境切り替え（&amp;to）はそのまま残ります</span>
+      <span class="hint" style="margin:0">「合わせる利用環境」の中身が置き換わります。<br>レイヤー切替（&amp;mo / &amp;lt）は同期先の対応するレイヤーへ自動で付け替わります。利用環境切り替え（&amp;to）はそのまま残ります</span>
     </div>
     <div id="plat-list" style="max-height:48vh;overflow:auto;margin:8px 0"></div>
     <div class="mrow" id="plat-actions" style="display:none">
@@ -890,14 +934,14 @@ ZMKでは<b>レイヤー0が常に有効</b>で、押されたキーは<b>有効
       <div class="htxt">
 ZMKファームウェア用のキーマップエディタです。ブラウザだけで動作し、編集内容は自動で保存されます。<br><br>名前の <b>Zero Mess Keymapper</b> は ZMK のバクロニムで、「配列のこんがらがりをゼロにする」という狙いを表しています。
       </div>
-      <div class="subh">考え方 — 「環境」ごとにレイヤーを持つ</div>
+      <div class="subh">考え方 — 「利用環境」ごとにレイヤーを持つ</div>
       <div class="htxt">
-このツールでは、<b>使う場面のことを「環境」</b>と呼びます。環境は <b>キーボード配列（OSの設定）× OS</b> の組み合わせです。<br><br>
+このツールでは、<b>使う場面のことを「利用環境」</b>と呼びます。利用環境は <b>キーボード配列（OSの設定）× OS</b> の組み合わせです。<br><br>
 例: 「会社PC = JIS × Windows」「自宅Mac = US × macOS」「iPad = US × iOS」<br><br>
-環境ごとにレイヤーのまとまりを作り、<b>ひとつをベースとして設計</b>し、残りは<b>「⇆ 環境間の同期」で自動生成</b>します。実機では、共有レイヤーに置いた切り替えキー（<kbd>&to</kbd>）で環境を切り替えます。こうすると、<b>どの機種でも指の動きを変えずに済みます</b>。<br><br>
-<b>環境が1つだけなら、これらの機能は表示されません。</b>ふつうのキーマップエディタとして使えます。<br><br>
-各環境は<b>レイヤー一式をそれぞれ持つ</b>のが基本です。マウスやBluetoothの層も環境ごとに複製されますが、同期は<b>キー単位で差分を見る</b>ため、Bluetoothキーのように環境で変わらないものは自動的にそのまま保たれます。テンキー層にBluetoothキーを混ぜても問題ありません。<br><br>
-レイヤー数を節約したい場合は、配列とOSを<b>どちらも「設定なし」</b>にした環境を作ると変換の対象外になるので、どの環境からも呼び出す共通の層として使えます。その場合は<b>すべての環境より後ろに置いてください</b>（理由は「このツールの機能 → レイヤー順序の点検」を参照）。
+利用環境ごとにレイヤーのまとまりを作り、<b>ひとつをベースとして設計</b>し、残りは<b>「⇆ 利用環境間の同期」で自動生成</b>します。実機では、共有レイヤーに置いた切り替えキー（<kbd>&to</kbd>）で利用環境を切り替えます。こうすると、<b>どの機種でも指の動きを変えずに済みます</b>。<br><br>
+<b>利用環境が1つだけなら、これらの機能は表示されません。</b>ふつうのキーマップエディタとして使えます。<br><br>
+各利用環境は<b>レイヤー一式をそれぞれ持つ</b>のが基本です。マウスやBluetoothの層も利用環境ごとに複製されますが、同期は<b>キー単位で差分を見る</b>ため、Bluetoothキーのように利用環境で変わらないものは自動的にそのまま保たれます。テンキー層にBluetoothキーを混ぜても問題ありません。<br><br>
+レイヤー数を節約したい場合は、配列とOSを<b>どちらも「設定なし」</b>にした利用環境を作ると変換の対象外になるので、どの利用環境からも呼び出す共通の層として使えます。その場合は<b>すべての利用環境より後ろに置いてください</b>（理由は「このツールの機能 → レイヤー順序の点検」を参照）。
       </div>
       <div class="subh">できること</div>
       <div class="htxt">
@@ -915,7 +959,7 @@ ZMKファームウェア用のキーマップエディタです。ブラウザ�
 ・Win⇄Mac変換(ショートカットと日本語入力キーの相互変換)<br>
 ・OS互換チェック(使用OSで反応しないキーの検出と修正)<br>
 ・Shift入力トグルと、実際に入力される文字でのキー表示<br>
-・環境ごとのレイヤー管理と、環境間の同期<br>
+・利用環境ごとのレイヤー管理と、利用環境間の同期<br>
 ・roBaのトラックボール(PMW3610)設定UI<br>
 ・インストール不要。ブラウザだけで動き、オフラインでも使えます</dd>
         <dt>できないこと</dt>
@@ -984,7 +1028,7 @@ ZMKには <a class="hext" href="https://zmk.studio/" target="_blank" rel="noopen
       <dl class="hdl">
         <dt>レイヤー切替</dt><dd>レイヤータブをクリックします。</dd>
         <dt>元に戻す / やり直す</dt><dd>画面上部の ↶ ↷ ボタン、または <kbd>Ctrl+Z</kbd> / <kbd>Ctrl+Y</kbd>(直近50件)。</dd>
-        <dt>レイヤー・環境の操作</dt><dd>追加は各環境行右端の「＋」(レイヤー)と最下段の「＋ 環境」。複製・削除はタブにマウスを乗せると出る ⧉ / ✕。並べ替えはタブや環境名の<b>ドラッグ&ドロップ</b>(環境名横の ▲▼ でも可)。番号と参照はすべて自動で追従します。</dd>
+        <dt>レイヤー・利用環境の操作</dt><dd>追加は各利用環境行右端の「＋」(レイヤー)と最下段の「＋ 利用環境」。複製・削除はタブにマウスを乗せると出る ⧉ / ✕。並べ替えはタブや利用環境名の<b>ドラッグ&ドロップ</b>(利用環境名横の ▲▼ でも可)。番号と参照はすべて自動で追従します。</dd>
         <dt>バックアップ</dt><dd>「☰ メニュー」の「バックアップ」でJSON保存。「読み込み」に渡すと完全復元できます。</dd>
       </dl>
     </div>
@@ -1044,17 +1088,17 @@ ZMKは自作キーボード向けのオープンソースファームウェア�
       <div class="subh" style="border:none;padding-top:0;margin-top:0">US⇄JIS変換</div>
       <div class="htxt">
 OSのキーボード設定が「日本語(JIS)」のPCでは、US配列想定のキーマップだと記号の位置がズレます(例: <kbd>@</kbd> のつもりが <kbd>"</kbd>)。この機能は、USグループの配置を<b>JIS認識のOSでも見た目どおりの記号が入力されるキーコードへ変換</b>し、JISグループへコピーします。<br><br>
-Shiftの有無で記号が変わるキー(<kbd>'</kbd> と <kbd>"</kbd> など)は、mod-morph(jis_*)を自動生成して対応します。この変換は「＋ 環境」または「⇆ 環境間の同期」から行います。環境に <b>US</b> と <b>JIS</b> の配列を設定しておけば、どちらの向きにも変換できます。実行前に対象キーの一覧で確認・選択でき、実機での切り替えキーは「⇥ 切り替えキーを配置」で用意できます。
+Shiftの有無で記号が変わるキー(<kbd>'</kbd> と <kbd>"</kbd> など)は、mod-morph(jis_*)を自動生成して対応します。この変換は「＋ 利用環境」または「⇆ 利用環境間の同期」から行います。利用環境に <b>US</b> と <b>JIS</b> の配列を設定しておけば、どちらの向きにも変換できます。実行前に対象キーの一覧で確認・選択でき、実機での切り替えキーは「⇥ 切り替えキーを配置」で用意できます。
       </div>
       <dl class="hdl">
-        <dt>環境切り替えキーの配置</dt><dd>実機で環境を切り替えるキーを、盤面から位置を選んで配置します。ZMKの <kbd>&to</kbd>（そのレイヤーへ移動し、他を解除する）を使います。<br><br>
-<b>Bluetoothプロファイルの切り替えを併用</b>するかは任意です。環境ごとに接続先の機器が違うならオンに、<b>有線だけで使う場合や同じ機器で環境を使い分ける場合はオフのまま</b>にしてください（レイヤーの切り替えだけを行います）。<br><br>
-配置先のレイヤーはどこでも構いません。どの環境からも押せる場所を選んでください。<span class="dim">補足: 電源を入れ直すと最初の環境（レイヤー0）に戻ります。いちばん使う環境を先頭に置いておくと扱いやすくなります。</span></dd>
-        <dt>レイヤー順序の点検</dt><dd>ZMKには「<b>レイヤー0は常に有効</b>」「<b>番号が大きいレイヤーが優先</b>」というルールがあります。そのため、あるレイヤーから<b>自分より前（番号が小さい）レイヤーを呼び出しても無視されます</b>。<br><br>「⇅ レイヤー順序を点検」は、実際にそうなっている呼び出しを見つけて表示し、ワンクリックで並べ替えられます（レイヤー番号と参照は自動調整）。あわせて、環境の最初のレイヤーにある透過（▽）も検出します。透過の位置ではレイヤー0＝最初の環境の割り当てが出てしまうためです。<span class="dim">役立つ場面: 環境を切り替えたらマウス操作が効かなくなった、という不具合の原因がこれです。どの環境からも呼び出したいレイヤーは、すべての環境より後ろに置いてください。</span></dd>
-        <dt>グループ間変換（配列規格 / OS）</dt><dd>グループごとに<b>配列規格</b>（US・JIS・UK・ドイツ語・Dvorak）と<b>対象OS</b>（Windows・macOS・Linux）を指定でき、あるグループの配置をもう一方に合わせて作り直せます。配列とOSの両方が違う場合は同時に変換します。US⇄JIS変換もこの仕組みの一部です。<span class="dim">役立つ場面: 3種類以上の環境を1つのキーボードで使い分けるとき、それぞれのグループを1回の操作で揃えられます。</span></dd>
+        <dt>利用環境切り替えキーの配置</dt><dd>実機で利用環境を切り替えるキーを、盤面から位置を選んで配置します。ZMKの <kbd>&to</kbd>（そのレイヤーへ移動し、他を解除する）を使います。<br><br>
+<b>Bluetoothプロファイルの切り替えを併用</b>するかは任意です。利用環境ごとに接続先の機器が違うならオンに、<b>有線だけで使う場合や同じ機器で利用環境を使い分ける場合はオフのまま</b>にしてください（レイヤーの切り替えだけを行います）。<br><br>
+配置先のレイヤーはどこでも構いません。どの利用環境からも押せる場所を選んでください。<span class="dim">補足: 電源を入れ直すと最初の利用環境（レイヤー0）に戻ります。いちばん使う利用環境を先頭に置いておくと扱いやすくなります。</span></dd>
+        <dt>レイヤー順序の点検</dt><dd>ZMKには「<b>レイヤー0は常に有効</b>」「<b>番号が大きいレイヤーが優先</b>」というルールがあります。そのため、あるレイヤーから<b>自分より前（番号が小さい）レイヤーを呼び出しても無視されます</b>。<br><br>「⇅ レイヤー順序を点検」は、実際にそうなっている呼び出しを見つけて表示し、ワンクリックで並べ替えられます（レイヤー番号と参照は自動調整）。あわせて、利用環境の最初のレイヤーにある透過（▽）も検出します。透過の位置ではレイヤー0＝最初の利用環境の割り当てが出てしまうためです。<span class="dim">役立つ場面: 利用環境を切り替えたらマウス操作が効かなくなった、という不具合の原因がこれです。どの利用環境からも呼び出したいレイヤーは、すべての利用環境より後ろに置いてください。</span></dd>
+        <dt>グループ間変換（配列規格 / OS）</dt><dd>グループごとに<b>配列規格</b>（US・JIS・UK・ドイツ語）と<b>対象OS</b>（Windows・macOS・Linux）を指定でき、あるグループの配置をもう一方に合わせて作り直せます。配列とOSの両方が違う場合は同時に変換します。US⇄JIS変換もこの仕組みの一部です。<span class="dim">役立つ場面: 3種類以上の利用環境を1つのキーボードで使い分けるとき、それぞれのグループを1回の操作で揃えられます。</span></dd>
         <dt>Win⇄Mac変換</dt><dd>WindowsとmacOSでは、同じ操作でも押すキーが異なります（コピーは <kbd>Ctrl+C</kbd> と <kbd>Cmd+C</kbd>、行頭移動は <kbd>Home</kbd> と <kbd>Cmd+←</kbd> など）。変換元のグループを元に、もう一方のOS向けの配置をまとめて作れます。日本語入力の切替（変換/無変換 ⇄ かな/英数）にも対応します。<span class="dim">役立つ場面: 会社ではWindows、自宅ではMacというように機種をまたぐとき、指の動きを変えずに済みます。US⇄JIS変換と同じく、実行前に差分を一覧で確認できます。</span></dd>
         <dt id="help-shift">Shift入力トグル</dt><dd>そのレイヤーで、Shiftを押しながらの記号打ちを使うかを指定します。「有効」のレイヤーだけJIS変換でmod-morphを生成し、キー右上にShift面を表示します。ショートカットの修飾同時押しには影響しません。<span class="dim">役立つ場面: ファンクション・マウス・Bluetooth用など記号打ちをしないレイヤーを「無効」にしておくと、不要なmod-morphが作られず、キーマップも表示もシンプルに保てます。</span></dd>
-        <dt>キーの表示はOSに合わせて変わります</dt><dd>同じキーコードでも呼び名はOSで違います。環境のOSを <b>macOS</b> か <b>iPadOS</b> にすると、盤面・チートシート・キー割り当て画面の表示が Mac の呼び方に変わります。<b>キーコード自体は変わりません</b>（表示だけの違いです）。
+        <dt>キーの表示はOSに合わせて変わります</dt><dd>同じキーコードでも呼び名はOSで違います。利用環境のOSを <b>macOS</b> か <b>iPadOS</b> にすると、盤面・チートシート・キー割り当て画面の表示が Mac の呼び方に変わります。<b>キーコード自体は変わりません</b>（表示だけの違いです）。
         <table class="modtab"><tr><th>キーコード</th><th>Windows / Linux</th><th>macOS / iPadOS</th></tr>
         <tr><td><code>LALT</code></td><td>Alt</td><td>⌥</td></tr>
         <tr><td><code>LGUI</code></td><td>Win</td><td>⌘</td></tr>
@@ -1062,7 +1106,7 @@ Shiftの有無で記号が変わるキー(<kbd>'</kbd> と <kbd>"</kbd> など)�
         <tr><td><code>LC(C)</code></td><td>^C</td><td>⌃C</td></tr>
         <tr><td><code>LA(TAB)</code></td><td>Alt+⇥</td><td>⌥⇥</td></tr>
         <tr><td><code>DEL</code></td><td>Del</td><td>⌦</td></tr></table>
-        OSが「設定なし」の環境では、Windows/Linux と同じ表記（キーコード名に近い形）で表示します。</dd>
+        OSが「設定なし」の利用環境では、Windows/Linux と同じ表記（キーコード名に近い形）で表示します。</dd>
         <dt>OSをまたぐときの修飾キー</dt><dd>ショートカットの体系は<b>Ctrl系（Windows / Linux / Android）</b>と<b>Cmd系（macOS / iPadOS）</b>の2つです。変換されるのは<b>主修飾キーだけ</b>で、対応は次のとおりです。
         <table class="modtab"><tr><th>Windows / Linux</th><th>macOS / iPadOS</th><th>扱い</th></tr>
         <tr><td>Ctrl（<kbd>LCTRL</kbd> / <kbd>LC()</kbd>）</td><td>Cmd（<kbd>LGUI</kbd> / <kbd>LG()</kbd>）</td><td>相互に変換</td></tr>
@@ -1072,20 +1116,32 @@ Shiftの有無で記号が変わるキー(<kbd>'</kbd> と <kbd>"</kbd> など)�
         <tr><td>—</td><td>Control（<kbd>LCTRL</kbd>）</td><td>対応するキーがない（下記）</td></tr></table>
         <b>AltとOptionは同じキー</b>です。ZMKではどちらも <kbd>LALT</kbd> で、押す位置も同じなので変換は不要です。ただし <kbd>Alt+Tab</kbd>（アプリ切替）と <kbd>Alt+F4</kbd>（終了）だけは、macOSでは <kbd>⌘Tab</kbd> / <kbd>⌘Q</kbd> にあたるため個別に変換します。<br><br>
         <b>WinキーとmacOSのControlキーには相手がいません。</b> Ctrl と Cmd を入れ替える都合上、元からWinキーを使っていた位置は変換後のCmdと重なります。該当する位置があると変換時に注意を出すので、その位置だけ手で見直してください。</dd>
-        <dt>マクロ・tap-dance と環境</dt><dd>コンボと同じことが、マクロ・tap-dance・自作のmod-morphにも起こります。定義は1つなのに複数の環境のレイヤーから呼ばれるため、記号を出す定義は配列の違う環境で別の記号になります。各画面を開くと検出して知らせるので、<b>「環境ごとに分ける」</b>を押してください。定義が複製され、<b>その環境のレイヤーの参照先も自動で差し替わります</b>。<span class="dim">変換で自動生成された mod-morph は、はじめから環境専用なので対象外です。</span></dd>
-        <dt>コンボと環境</dt><dd>ZMKのコンボは<b>全レイヤーで動きます</b>。そのため <kbd>"</kbd> のような記号を出すコンボは、配列の違う環境では別の記号が出てしまいます。「Combo」画面を開くと該当するコンボを検出して知らせるので、<b>「環境ごとに分ける」</b>を押してください。コンボが環境の数だけ複製され、それぞれに <code>layers</code> 指定と変換後の動作が入ります。<span class="dim">Bluetoothやマウスなど、環境で変わらない動作のコンボは検出されません。</span></dd>
-        <dt>環境の設定を変える</dt><dd>レイヤー一覧の各環境の右にある<b>設定チップ</b>（例: <span class="dim">JIS × Windows</span>）をクリックすると、キーボード配列とOSをその場で変更できます。設定を変えても<b>配置はそのまま</b>です。実際に変換するときは「⇆ 環境間の同期」を使ってください。</dd>
-        <dt>環境の追加</dt><dd>「＋ 環境」を押すと、名前・キーボード配列・OS・コピー元を1つの画面で指定できます。コピー元を選んでおけば、<b>その配置を変換したものが入った状態</b>で作られるので、あとから同期する必要はありません。<span class="dim">以前は「グループを作る → レイヤーを増やす → 同期する」の3段階でしたが、1回で済むようになりました。</span></dd>
-        <dt>環境と「設定なし」</dt><dd>レイヤーは<b>環境</b>（キーボード配列 × OS）ごとにまとめて管理します。各環境は<b>レイヤー一式をそれぞれ持つ</b>のが基本です。<br><br>
-配列とOSを<b>どちらも「設定なし」</b>にした環境は変換の対象外になります。これを利用すると、どの環境からも呼び出す共通のレイヤーとして使えます（その場合はすべての環境より後ろに置いてください）。ツール側で「共有レイヤー」という特別な種別は設けていません。<br><br>
-実のところ、完全に環境非依存なキーは <kbd>&bt</kbd>（Bluetooth切替）や <kbd>&rgb_ug</kbd> のような<b>キーボード内部で完結するもの</b>だけです。マウスのスクロールはmacOSの「ナチュラルスクロール」で向きが変わり、<kbd>KP_EQUAL</kbd> はWindowsで反応せず、<kbd>F13</kbd>以降はAndroidが非対応です。つまり「この層は環境非依存」と層単位で決めつけるのは無理があります。<br><br>
-そこで本ツールは<b>キー単位で差分を見て同期</b>します。テンキー層にBluetoothキーを混ぜても、Bluetoothキーはそのまま保たれ、環境で変わるキーだけが変換されます。書き出し時はグループ番号を含む名前で保存されるため、グループが違えば同じレイヤー名を使えます。グループ名の左のラベルには色が付き、ラベル横の●からいつでも変更できます(初期値: US=青、JIS=シアン、GENERAL=アンバー)。<span class="dim">役立つ場面: US側とJIS側で対応するレイヤーに同じ名前を付けられるので、対応関係がひと目で分かります。</span></dd>
+        <dt>マクロ・tap-dance と利用環境</dt><dd>コンボと同じことが、マクロ・tap-dance・自作のmod-morphにも起こります。定義は1つなのに複数の利用環境のレイヤーから呼ばれるため、記号を出す定義は配列の違う利用環境で別の記号になります。各画面を開くと検出して知らせるので、<b>「利用環境ごとに分ける」</b>を押してください。定義が複製され、<b>その利用環境のレイヤーの参照先も自動で差し替わります</b>。<span class="dim">変換で自動生成された mod-morph は、はじめから利用環境専用なので対象外です。</span></dd>
+        <dt>コンボと利用環境</dt><dd>ZMKのコンボは<b>全レイヤーで動きます</b>。そのため <kbd>"</kbd> のような記号を出すコンボは、配列の違う利用環境では別の記号が出てしまいます。「Combo」画面を開くと該当するコンボを検出して知らせるので、<b>「利用環境ごとに分ける」</b>を押してください。コンボが利用環境の数だけ複製され、それぞれに <code>layers</code> 指定と変換後の動作が入ります。<span class="dim">Bluetoothやマウスなど、利用環境で変わらない動作のコンボは検出されません。</span></dd>
+        <dt>利用環境の設定を変える</dt><dd>レイヤー一覧の各利用環境の右にある<b>設定チップ</b>（例: <span class="dim">JIS × Windows</span>）をクリックすると、キーボード配列とOSをその場で変更できます。設定を変えても<b>配置はそのまま</b>です。実際に変換するときは「⇆ 利用環境間の同期」を使ってください。</dd>
+        <dt>利用環境の追加</dt><dd>「＋ 利用環境」を押すと、名前・キーボード配列・OS・コピー元を1つの画面で指定できます。コピー元を選んでおけば、<b>その配置を変換したものが入った状態</b>で作られるので、あとから同期する必要はありません。<span class="dim">以前は「グループを作る → レイヤーを増やす → 同期する」の3段階でしたが、1回で済むようになりました。</span></dd>
+        <dt>利用環境と「設定なし」</dt><dd>レイヤーは<b>利用環境</b>（キーボード配列 × OS）ごとにまとめて管理します。各利用環境は<b>レイヤー一式をそれぞれ持つ</b>のが基本です。<br><br>
+配列とOSを<b>どちらも「設定なし」</b>にした利用環境は変換の対象外になります。これを利用すると、どの利用環境からも呼び出す共通のレイヤーとして使えます（その場合はすべての利用環境より後ろに置いてください）。ツール側で「共有レイヤー」という特別な種別は設けていません。<br><br>
+実のところ、完全に利用環境に依存しないなキーは <kbd>&bt</kbd>（Bluetooth切替）や <kbd>&rgb_ug</kbd> のような<b>キーボード内部で完結するもの</b>だけです。マウスのスクロールはmacOSの「ナチュラルスクロール」で向きが変わり、<kbd>KP_EQUAL</kbd> はWindowsで反応せず、<kbd>F13</kbd>以降はAndroidが非対応です。つまり「この層は利用環境に依存しない」と層単位で決めつけるのは無理があります。<br><br>
+そこで本ツールは<b>キー単位で差分を見て同期</b>します。テンキー層にBluetoothキーを混ぜても、Bluetoothキーはそのまま保たれ、利用環境で変わるキーだけが変換されます。書き出し時はグループ番号を含む名前で保存されるため、グループが違えば同じレイヤー名を使えます。グループ名の左のラベルには色が付き、ラベル横の●からいつでも変更できます(初期値: US=青、JIS=シアン、GENERAL=アンバー)。<span class="dim">役立つ場面: US側とJIS側で対応するレイヤーに同じ名前を付けられるので、対応関係がひと目で分かります。</span></dd>
         <dt>OS互換チェック</dt><dd>キーコードには、特定のOSだけが解釈しないものがあります。たとえばメディアキーは見た目が同じでも中身が2種類あり(<kbd>K_MUTE</kbd> と <kbd>C_MUTE</kbd>)、前者はWindowsとmacOSが解釈しないため<b>押しても何も起きません</b>。逆に <kbd>C_STOP</kbd> のようにWindowsだけ非対応のキーもあります。<br><br>「☰ メニュー → OS互換チェック」で<b>使用するOSを選ぶ</b>と、そのOSで反応しないキーを一覧表示し、代替キーへ一括置換できます。<span class="dim">補足: Linuxは最も対応範囲が広く、メディアキーはどちらの種類でも動作します。ただし <kbd>SYSREQ</kbd> や <kbd>LOCKING_CAPS</kbd> のような旧式のキー、<kbd>INT7</kbd>〜<kbd>INT9</kbd>・<kbd>LANG6</kbd>〜<kbd>LANG9</kbd> は非対応です。判定はZMK公式のキーコード一覧に基づいています。</span></dd>
         <dt>整合性チェック</dt><dd>書き出し・プレビュー時に、存在しないレイヤーへの参照や未定義ビヘイビアなどを自動で検査し、問題があれば一覧表示します。<span class="dim">役立つ場面: ビルドしてから気付くミスを、書き出す前に発見できます。</span></dd>
         <dt>バックアップ / 復元</dt><dd>全設定をJSONファイル1つで保存・完全復元できます。<span class="dim">役立つ場面: ブラウザのデータ削除や別PCへの移行、配列の試行錯誤前の保険に。</span></dd>
         <dt>チートシート</dt><dd>全レイヤー・コンボ・各種設定をまとめた印刷用HTMLを出力します(☰ メニュー)。<span class="dim">役立つ場面: 覚えるまでの間、手元に置く配列表として使えます。</span></dd>
         <dt>GitHub連携</dt><dd>「☰ メニュー → GitHub連携」でzmk-configリポジトリから直接keymapを読み込み、編集後そのままコミットできます。コミットするとGitHub Actionsのビルドが自動で始まります。<span class="dim">役立つ場面: ファイルのダウンロードとアップロードが不要になり、編集からビルドまでブラウザだけで完結します。</span><br><br><b>準備:</b> GitHubの Settings → Developer settings → Personal access tokens → Fine-grained tokens でトークンを作成し、対象リポジトリを選んで Repository permissions の Contents を「Read and write」に設定してください。トークンはこのブラウザにのみ保存され、通信先はGitHub APIだけです(共用PCでは「このブラウザに保存」のチェックを外してください)。</dd>
-        <dt>キーボードプロファイル</dt><dd>「☰ メニュー → キーボード」で編集対象のキーボードを管理します。ZMKの物理レイアウト定義(key_physical_attrs)を含むファイルを読み込むと盤面を自動で再現でき、roBa以外のキーボードも編集できます。<span class="dim">役立つ場面: 複数のZMKキーボードを1つのツールで管理できます。</span></dd>
+        <dt>キーボードプロファイル</dt><dd>「☰ メニュー → キーボード」で編集対象のキーボードを選びます。<b>代表的なキーボードを内蔵</b>しているので、一覧から選ぶだけで使えます。
+        <table class="modtab"><tr><th>プロファイル</th><th>キー数</th></tr>
+        <tr><td>roBa（トラックボール搭載）</td><td>43</td></tr>
+        <tr><td>Corne（6列 / crkbd）</td><td>42</td></tr>
+        <tr><td>Corne（5列）</td><td>36</td></tr>
+        <tr><td>Lily58</td><td>58</td></tr>
+        <tr><td>Sofle</td><td>60</td></tr>
+        <tr><td>格子 4×10 / 4×12 / 5×12</td><td>40 / 48 / 60</td></tr></table>
+        <b>「形を編集」</b>を押すと、キーの大きさ（2Uのバックスペース、6.25Uのスペースなど）と位置を整えられます。単位は 1U＝キー1個分です。大きさを変えると同じ行の後ろのキーが自動でずれ、重なりがあれば知らせます。<b>キーの割り当ては変わりません</b>（見た目の形だけの話です）。内蔵プロファイルを編集した場合は複製が作られ、元は残ります。<br>
+        <b>「レイアウトを探す」</b>は、GitHubのリポジトリを指定して物理レイアウトの定義を探します。既定の <code>zmkfirmware/zmk</code> なら、TKL・60%/65%/75%・各種テンキー・Corne・Kyria・Sofle など<b>60種類以上</b>が見つかります。自分の zmk-config を指定することもできます。見つかったものを「追加」すると一覧に並びます。<span class="dim">ファイルの中身はGitHubのraw配信から取得するため、APIの回数制限をほとんど使いません。</span><br>
+        一覧にないキーボードは、ZMKの物理レイアウト定義（<code>key_physical_attrs</code> を含む <code>.dtsi</code> / <code>.overlay</code>）を読み込めば盤面を再現できます。キー数を指定して簡易グリッドを作ることもできます。<br>
+        <b>「使用」</b>は今の配置を保ったままキーボードだけ切り替えます（キー数が違う場合、不足は▽で埋め、超過は末尾から削られます）。<b>「新規作成」</b>はそのキーボード用の空のキーマップを作ります。
+        <span class="dim">内蔵プロファイルの座標は ZMK公式リポジトリ（app/dts/layouts/）の物理レイアウト定義をそのまま取り込んでいます。</span></dd>
         <dt>キーテスター</dt><dd>キーボードから実際に入力して、OSに届いたキーと修飾の状態を確認できます(「☰ メニュー」)。<span class="dim">役立つ場面: ファームウェア書き込み後の動作確認や、JIS変換後に記号が正しく出るかのチェックに。</span></dd>
         <dt>テーマ・表示言語</dt><dd>テーマ(自動 / ライト / ダーク)と表示言語(日本語 / English)を「表示切り替え」行で切り替えられます。</dd>
       </dl>
@@ -1099,9 +1155,80 @@ Shiftの有無で記号が変わるキー(<kbd>'</kbd> と <kbd>"</kbd> など)�
  * 文字テーブル(LOCALE_CHARS) / .keymapパース / 生成 / 各機能ノードの
  * パース&パッチ / グループ・変換ユーティリティ / 表示ラベル
  * ============================================================ */
-const APP_VERSION = '3.9.0';
+const APP_VERSION = '4.3.1';
 
-let NUM_KEYS = 43;
+const HHKB_KEYS = [[100,100,0,0,0,0,0],
+[100,100,100,0,0,0,0],
+[100,100,200,0,0,0,0],
+[100,100,300,0,0,0,0],
+[100,100,400,0,0,0,0],
+[100,100,500,0,0,0,0],
+[100,100,600,0,0,0,0],
+[100,100,700,0,0,0,0],
+[100,100,800,0,0,0,0],
+[100,100,900,0,0,0,0],
+[100,100,1000,0,0,0,0],
+[100,100,1100,0,0,0,0],
+[100,100,1200,0,0,0,0],
+[200,100,1300,0,0,0,0],
+[150,100,0,100,0,0,0],
+[100,100,150,100,0,0,0],
+[100,100,250,100,0,0,0],
+[100,100,350,100,0,0,0],
+[100,100,450,100,0,0,0],
+[100,100,550,100,0,0,0],
+[100,100,650,100,0,0,0],
+[100,100,750,100,0,0,0],
+[100,100,850,100,0,0,0],
+[100,100,950,100,0,0,0],
+[100,100,1050,100,0,0,0],
+[100,100,1150,100,0,0,0],
+[100,100,1250,100,0,0,0],
+[150,100,1350,100,0,0,0],
+[175,100,0,200,0,0,0],
+[100,100,175,200,0,0,0],
+[100,100,275,200,0,0,0],
+[100,100,375,200,0,0,0],
+[100,100,475,200,0,0,0],
+[100,100,575,200,0,0,0],
+[100,100,675,200,0,0,0],
+[100,100,775,200,0,0,0],
+[100,100,875,200,0,0,0],
+[100,100,975,200,0,0,0],
+[100,100,1075,200,0,0,0],
+[100,100,1175,200,0,0,0],
+[225,100,1275,200,0,0,0],
+[225,100,0,300,0,0,0],
+[100,100,225,300,0,0,0],
+[100,100,325,300,0,0,0],
+[100,100,425,300,0,0,0],
+[100,100,525,300,0,0,0],
+[100,100,625,300,0,0,0],
+[100,100,725,300,0,0,0],
+[100,100,825,300,0,0,0],
+[100,100,925,300,0,0,0],
+[100,100,1025,300,0,0,0],
+[100,100,1125,300,0,0,0],
+[275,100,1225,300,0,0,0],
+[150,100,0,400,0,0,0],
+[100,100,150,400,0,0,0],
+[150,100,250,400,0,0,0],
+[700,100,400,400,0,0,0],
+[150,100,1100,400,0,0,0],
+[100,100,1250,400,0,0,0],
+[150,100,1350,400,0,0,0]];
+const HHKB_ROWS = [[0, 14, 14], [14, 14, 14], [28, 13, 13], [41, 12, 12], [53, 7, 7]];
+const HHKB_PROFILE = {
+  id: 'hhkb',
+  name: 'HHKB (英字)',
+  note: '60% HHKB / Tsangan',
+  keyCount: 60,
+  keys: HHKB_KEYS,
+  rows: HHKB_ROWS,
+  features: {}
+};
+
+let NUM_KEYS = 60;   // 既定のキーボード(HHKB)のキー数
 // roBa physical layout: [w,h,x,y,rot(centi-deg*100),rx,ry]
 const ROBA_KEYS = [
 [100,100,0,37,0,0,0],[100,100,100,12,0,0,0],[100,100,200,0,0,0,0],[100,100,300,12,0,0,0],[100,100,400,24,0,0,0],
@@ -1114,10 +1241,10 @@ const ROBA_KEYS = [
 [100,100,650,387,-2000,750,387],[100,100,763,350,-1000,863,350],
 [100,100,1200,337,0,0,0]
 ];
-let PHYS = ROBA_KEYS;
+let PHYS = HHKB_KEYS;
 // 行構造(書き出し整形用): [開始index, 左手キー数, 行の総キー数]
 const ROBA_ROWS = [[0,5,10],[10,6,12],[22,6,12],[34,6,9]];
-let ROWS = ROBA_ROWS;
+let ROWS = HHKB_ROWS;
 /* ---------- 多言語対応 (ja / en) ----------
  * 日本語をキーにした辞書。DOMを走査して text / title / data-tip /
  * placeholder を差し替える。未登録の文字列はそのまま残す(安全側)。 */
@@ -1128,11 +1255,11 @@ const I18N_EN = {
 'リセット':'Reset',
 'レイヤー':'Layer','表示切り替え':'View','ビヘイビア設定':'Behaviors',
 '⇧ Shift入力: 無効':'⇧ Shift input: Off','⇧ Shift入力: 有効':'⇧ Shift input: On',
-'⌘ Win⇄Mac変換':'⌘ Win⇄Mac','⇆ 環境間の同期':'⇆ Sync environments','環境間の同期':'Environment sync','同じ操作感で別の環境を作る':'Recreate the same feel elsewhere','同じ操作感を別の環境で再現する':'Recreate the same feel in another environment','基準にする環境:':'Base environment:','合わせる環境:':'Target environment:','基準の環境:':'Base:','キーボード配列:':'Keyboard layout:','同期する':'Sync','＋ 環境を追加':'+ Add environment','＋ 環境':'+ Environment','ベース':'Base','環境':'Environment','⇅ レイヤー順序を点検':'⇅ Check layer order','⇥ 切り替えキーを配置':'⇥ Place switch keys','環境を追加':'Add environment','環境の設定':'Environment settings','配列 / OS を設定':'Set layout / OS','保存':'Save','環境ごとに分ける':'Split per environment','別の機種で同じ操作感にする':'Same feel on another machine','既存の環境から配置をコピーして変換する':'Copy and convert an existing environment','コピー元:':'Copy from:','作成':'Create','半角英字。例: MAC / IPAD / WIN':'Latin letters only. e.g. MAC / IPAD / WIN','同じ数のレイヤーが作られ、配列とOSの違いに合わせて変換されます':'The same number of layers is created and converted for the new layout and OS','設定なし':'Not set','配列なし':'No layout','呼び出される側を後ろに移動':'Move the called layers to the end','環境切り替えキーの配置':'Place environment switch keys','実機で使う環境を切り替える':'Switch environments on the keyboard','配置先レイヤー:':'Place on layer:','Bluetoothプロファイルも一緒に切り替える':'Also switch the Bluetooth profile','キーの位置（クリックで選択）':'Key position (click to choose)','配置する':'Place','位置を指定':'Choose position','キー位置を選んでください':'Choose a key position','レイヤー順序の点検':'Layer order check','環境を切り替えても正しく動くか':'Will it still work after switching','レイヤー番号と参照は自動で調整されます':'Layer numbers and references are adjusted automatically','要修正':'Fix needed','注意':'Note','グループ間の変換':'Group conversion','配列規格とOSの違いを吸収する':'Bridge layout and OS differences','変換元の設定:':'Source settings:','変換先の設定:':'Target settings:','配列:':'Layout:','OS:':'OS:','指定しない':'Not specified',
+'⌘ Win⇄Mac変換':'⌘ Win⇄Mac','⇆ 利用環境間の同期':'⇆ Sync environments','利用環境間の同期':'Environment sync','同じ操作感で別の利用環境を作る':'Recreate the same feel elsewhere','同じ操作感を別の利用環境で再現する':'Recreate the same feel in another environment','基準にする利用環境:':'Base environment:','合わせる利用環境:':'Target environment:','基準の利用環境:':'Base:','キーボード配列:':'Keyboard layout:','同期する':'Sync','＋ 利用環境を追加':'+ Add environment','＋ 利用環境':'+ Environment','ベース':'Base','利用環境':'Environment','⇅ レイヤー順序を点検':'⇅ Check layer order','⇥ 切り替えキーを配置':'⇥ Place switch keys','利用環境を追加':'Add environment','利用環境の設定':'Environment settings','配列 / OS を設定':'Set layout / OS','保存':'Save','利用環境ごとに分ける':'Split per environment','別の機種で同じ操作感にする':'Same feel on another machine','既存の利用環境から配置をコピーして変換する':'Copy and convert an existing environment','コピー元:':'Copy from:','作成':'Create','半角英字。例: MAC / IPAD / WIN':'Latin letters only. e.g. MAC / IPAD / WIN','同じ数のレイヤーが作られ、配列とOSの違いに合わせて変換されます':'The same number of layers is created and converted for the new layout and OS','設定なし':'Not set','配列なし':'No layout','呼び出される側を後ろに移動':'Move the called layers to the end','利用環境切り替えキーの配置':'Place environment switch keys','実機で使う利用環境を切り替える':'Switch environments on the keyboard','配置先レイヤー:':'Place on layer:','Bluetoothプロファイルも一緒に切り替える':'Also switch the Bluetooth profile','キーの位置（クリックで選択）':'Key position (click to choose)','配置する':'Place','位置を指定':'Choose position','キー位置を選んでください':'Choose a key position','レイヤー順序の点検':'Layer order check','利用環境を切り替えても正しく動くか':'Will it still work after switching','レイヤー番号と参照は自動で調整されます':'Layer numbers and references are adjusted automatically','要修正':'Fix needed','注意':'Note','グループ間の変換':'Group conversion','配列規格とOSの違いを吸収する':'Bridge layout and OS differences','変換元の設定:':'Source settings:','変換先の設定:':'Target settings:','配列:':'Layout:','OS:':'OS:','指定しない':'Not specified',
 '⊞ Combo表示: OFF':'⊞ Show combos: Off','⊞ Combo表示: ON':'⊞ Show combos: On',
 '№ fw番号で表示':'№ Show firmware no.','№ グループ番号で表示':'№ Show group no.',
 '◐ テーマ: 自動':'◐ Theme: Auto','○ テーマ: ライト':'○ Theme: Light','● テーマ: ダーク':'● Theme: Dark',
-'⚙ 全体調整':'⚙ Global tuning','◉ トラックボール':'◉ Trackball','＋ グループ':'+ Group',
+'⚙ 全体調整':'⚙ Global tuning','◉ トラックボール':'◉ Trackball',
 '✕ 閉じる':'✕ Close','適用':'Apply','保存':'Save','クリア':'Clear','キャンセル':'Cancel',
 'フォームをクリア':'Clear form','変換を実行':'Convert','差分を確認':'Show differences',
 '✎ 編集':'✎ Edit','使用':'Use','新規作成':'New','未設定':'Not set','📋 コピー':'📋 Copy',
@@ -1497,7 +1624,7 @@ const ROBA_PROFILE = {
   rows: ROBA_ROWS,
   features: { trackball: true, encoder: true }
 };
-let KEYBOARD = ROBA_PROFILE;
+let KEYBOARD = HHKB_PROFILE;
 /** アクティブなキーボードプロファイルを切り替える(全描画・生成が追従) */
 function setKeyboard(profile){
   KEYBOARD = profile;
@@ -1517,6 +1644,40 @@ function parsePhysicalLayout(text){
     if(nums.slice(0,7).every(n=>!isNaN(n))) keys.push(nums.slice(0,7));
   }
   return keys.length? keys : null;
+}
+/** 1つのファイルに含まれる zmk,physical-layout をすべて取り出す。
+ * 1ファイルに複数(6列/5列など)入っていることがあるため、
+ * ノード名と display-name を添えて配列で返す。 */
+function parsePhysicalLayouts(text){
+  const out = [];
+  const re = /([A-Za-z_]\w*)\s*:\s*[A-Za-z_]\w*\s*\{([\s\S]*?)\n\s*\};/g;
+  let m;
+  while((m = re.exec(text))){
+    const node = m[1], body = m[2];
+    if(!/key_physical_attrs/.test(body)) continue;
+    const keys = parsePhysicalLayout(body);
+    if(!keys) continue;
+    const dn = body.match(/display-name\s*=\s*"([^"]*)"/);
+    out.push({node, name:(dn? dn[1] : node), keys, keyCount:keys.length});
+  }
+  // ノード単位で拾えなかった場合は、ファイル全体を1つの配列として扱う
+  if(!out.length){
+    const keys = parsePhysicalLayout(text);
+    if(keys){
+      const dn = text.match(/display-name\s*=\s*"([^"]*)"/);
+      out.push({node:null, name:(dn? dn[1] : 'レイアウト'), keys, keyCount:keys.length});
+    }
+  }
+  return out;
+}
+/** 物理レイアウトが書かれていそうなファイルかどうか(取得前のふるい分け) */
+function looksLikeLayoutFile(path){
+  return /\.(dtsi|overlay|dts|keymap)$/i.test(path) && !/(^|\/)build\//.test(path);
+}
+/** 調べる順番。レイアウト定義が置かれがちな場所を先に見る */
+function layoutScanOrder(paths){
+  const score = p=> (/layout/i.test(p)? 0 : /\/dts\/|shields?\/|boards?\//i.test(p)? 1 : 2);
+  return paths.slice().sort((a,b)=> score(a)-score(b) || a.length-b.length || (a<b? -1:1));
 }
 /** キー列から行構造を推定(x座標が戻ったら改行。最大の隙間で左右分割) */
 function deriveRows(keys){
@@ -1545,6 +1706,87 @@ function gridKeys(count, cols){
   for(let i=0;i<count;i++) keys.push([100,100,(i%cols)*100,Math.floor(i/cols)*100,0,0,0]);
   return keys;
 }
+/* HHKB(英字) — 既定のキーボード。
+ * 出典: ZMK公式 app/dts/layouts/common/60percent/hhkb.dtsi
+ * 1.5U/1.75U/2U/2.25U/2.75U/7U を含むので、キー幅の扱いの実例にもなる。 */
+
+/* ---------- 内蔵キーボードプロファイル ----------
+ * 物理レイアウトは ZMK公式リポジトリ(app/dts/layouts/)の
+ * zmk,physical-layout 定義をそのまま取り込んでいる。
+ * 手で座標を起こすと配置がずれるため、公式の値を使うこと。
+ * 格子配列は計算で作れるので gridKeys から生成する。 */
+const BUILTIN_PROFILES = [
+  HHKB_PROFILE,
+  ROBA_PROFILE,
+  {id:'corne6', name:'Corne (6列)', note:'crkbd / foostan', keyCount:42,
+   keys:[[100,100,0,37,0,0,0],[100,100,100,37,0,0,0],[100,100,200,12,0,0,0],[100,100,300,0,0,0,0],[100,100,400,12,0,0,0],[100,100,500,24,0,0,0],[100,100,800,24,0,0,0],[100,100,900,12,0,0,0],[100,100,1000,0,0,0,0],[100,100,1100,12,0,0,0],[100,100,1200,37,0,0,0],[100,100,1300,37,0,0,0],[100,100,0,137,0,0,0],[100,100,100,137,0,0,0],[100,100,200,112,0,0,0],[100,100,300,100,0,0,0],[100,100,400,112,0,0,0],[100,100,500,124,0,0,0],[100,100,800,124,0,0,0],[100,100,900,112,0,0,0],[100,100,1000,100,0,0,0],[100,100,1100,112,0,0,0],[100,100,1200,137,0,0,0],[100,100,1300,137,0,0,0],[100,100,0,237,0,0,0],[100,100,100,237,0,0,0],[100,100,200,212,0,0,0],[100,100,300,200,0,0,0],[100,100,400,212,0,0,0],[100,100,500,224,0,0,0],[100,100,800,224,0,0,0],[100,100,900,212,0,0,0],[100,100,1000,200,0,0,0],[100,100,1100,212,0,0,0],[100,100,1200,237,0,0,0],[100,100,1300,237,0,0,0],[100,100,350,312,0,0,0],[100,100,450,312,1200,450,412],[100,150,548,283,2400,548,433],[100,150,752,283,-2400,852,433],[100,100,850,312,-1200,950,412],[100,100,950,312,0,0,0]],
+   rows:[[0, 6, 12], [12, 6, 12], [24, 6, 12], [36, 3, 6]], features:{}},
+  {id:'corne5', name:'Corne (5列)', note:'crkbd 5column', keyCount:36,
+   keys:[[100,100,0,37,0,0,0],[100,100,100,12,0,0,0],[100,100,200,0,0,0,0],[100,100,300,12,0,0,0],[100,100,400,24,0,0,0],[100,100,700,24,0,0,0],[100,100,800,12,0,0,0],[100,100,900,0,0,0,0],[100,100,1000,12,0,0,0],[100,100,1100,37,0,0,0],[100,100,0,137,0,0,0],[100,100,100,112,0,0,0],[100,100,200,100,0,0,0],[100,100,300,112,0,0,0],[100,100,400,124,0,0,0],[100,100,700,124,0,0,0],[100,100,800,112,0,0,0],[100,100,900,100,0,0,0],[100,100,1000,112,0,0,0],[100,100,1100,137,0,0,0],[100,100,0,237,0,0,0],[100,100,100,212,0,0,0],[100,100,200,200,0,0,0],[100,100,300,212,0,0,0],[100,100,400,224,0,0,0],[100,100,700,224,0,0,0],[100,100,800,212,0,0,0],[100,100,900,200,0,0,0],[100,100,1000,212,0,0,0],[100,100,1100,237,0,0,0],[100,100,250,312,0,0,0],[100,100,350,312,1200,350,412],[100,150,448,283,2400,448,433],[100,150,652,283,-2400,752,433],[100,100,750,312,-1200,850,412],[100,100,850,312,0,0,0]],
+   rows:[[0, 5, 10], [10, 5, 10], [20, 5, 10], [30, 3, 6]], features:{}},
+  {id:'lily58', name:'Lily58', note:'kata0510', keyCount:58,
+   keys:[[100,100,0,50,0,0,0],[100,100,100,37,0,0,0],[100,100,200,12,0,0,0],[100,100,300,0,0,0,0],[100,100,400,12,0,0,0],[100,100,500,25,0,0,0],[100,100,1050,25,0,0,0],[100,100,1150,12,0,0,0],[100,100,1250,0,0,0,0],[100,100,1350,12,0,0,0],[100,100,1450,37,0,0,0],[100,100,1550,50,0,0,0],[100,100,0,150,0,0,0],[100,100,100,137,0,0,0],[100,100,200,112,0,0,0],[100,100,300,100,0,0,0],[100,100,400,112,0,0,0],[100,100,500,125,0,0,0],[100,100,1050,125,0,0,0],[100,100,1150,112,0,0,0],[100,100,1250,100,0,0,0],[100,100,1350,112,0,0,0],[100,100,1450,137,0,0,0],[100,100,1550,150,0,0,0],[100,100,0,250,0,0,0],[100,100,100,237,0,0,0],[100,100,200,212,0,0,0],[100,100,300,200,0,0,0],[100,100,400,212,0,0,0],[100,100,500,225,0,0,0],[100,100,1050,225,0,0,0],[100,100,1150,212,0,0,0],[100,100,1250,200,0,0,0],[100,100,1350,212,0,0,0],[100,100,1450,237,0,0,0],[100,100,1550,250,0,0,0],[100,100,0,350,0,0,0],[100,100,100,337,0,0,0],[100,100,200,312,0,0,0],[100,100,300,300,0,0,0],[100,100,400,312,0,0,0],[100,100,500,325,0,0,0],[100,100,600,275,0,0,0],[100,100,950,275,0,0,0],[100,100,1050,325,0,0,0],[100,100,1150,312,0,0,0],[100,100,1250,300,0,0,0],[100,100,1350,312,0,0,0],[100,100,1450,337,0,0,0],[100,100,1550,350,0,0,0],[100,100,250,412,0,0,0],[100,100,350,415,0,0,0],[100,100,450,425,0,0,0],[100,150,575,400,3000,625,475],[100,150,975,400,-3000,1025,475],[100,100,1100,425,0,0,0],[100,100,1200,415,0,0,0],[100,100,1300,415,0,0,0]],
+   rows:[[0, 6, 12], [12, 6, 12], [24, 6, 12], [36, 7, 14], [50, 4, 8]], features:{}},
+  {id:'sofle', name:'Sofle', note:'josefadamcik', keyCount:60,
+   keys:[[100,100,0,37,0,0,0],[100,100,100,37,0,0,0],[100,100,200,12,0,0,0],[100,100,300,0,0,0,0],[100,100,400,12,0,0,0],[100,100,500,24,0,0,0],[100,100,900,24,0,0,0],[100,100,1000,12,0,0,0],[100,100,1100,0,0,0,0],[100,100,1200,12,0,0,0],[100,100,1300,37,0,0,0],[100,100,1400,37,0,0,0],[100,100,0,137,0,0,0],[100,100,100,137,0,0,0],[100,100,200,112,0,0,0],[100,100,300,100,0,0,0],[100,100,400,112,0,0,0],[100,100,500,124,0,0,0],[100,100,900,124,0,0,0],[100,100,1000,112,0,0,0],[100,100,1100,100,0,0,0],[100,100,1200,112,0,0,0],[100,100,1300,137,0,0,0],[100,100,1400,137,0,0,0],[100,100,0,237,0,0,0],[100,100,100,237,0,0,0],[100,100,200,212,0,0,0],[100,100,300,200,0,0,0],[100,100,400,212,0,0,0],[100,100,500,224,0,0,0],[100,100,900,224,0,0,0],[100,100,1000,212,0,0,0],[100,100,1100,200,0,0,0],[100,100,1200,212,0,0,0],[100,100,1300,237,0,0,0],[100,100,1400,237,0,0,0],[100,100,0,337,0,0,0],[100,100,100,337,0,0,0],[100,100,200,312,0,0,0],[100,100,300,300,0,0,0],[100,100,400,312,0,0,0],[100,100,500,324,0,0,0],[100,100,600,274,0,0,0],[100,100,800,274,0,0,0],[100,100,900,324,0,0,0],[100,100,1000,312,0,0,0],[100,100,1100,300,0,0,0],[100,100,1200,312,0,0,0],[100,100,1300,337,0,0,0],[100,100,1400,337,0,0,0],[100,100,175,437,0,0,0],[100,100,275,412,0,0,0],[100,100,375,412,0,0,0],[100,100,490,412,1200,490,412],[100,150,600,383,2400,600,433],[100,150,800,383,-2400,900,433],[100,100,910,412,-1200,1010,412],[100,100,1025,412,0,0,0],[100,100,1125,412,0,0,0],[100,100,1225,437,0,0,0]],
+   rows:[[0, 6, 12], [12, 6, 12], [24, 6, 12], [36, 7, 14], [50, 5, 10]], features:{}},
+  {id:'ortho4x12', name:'格子 4×12', note:'Planck など', keyCount:48,
+   keys:gridKeys(48,12), rows:[[0,12,12],[12,12,12],[24,12,12],[36,12,12]], features:{}},
+  {id:'ortho4x10', name:'格子 4×10', note:'40%ロウスタッガード無し', keyCount:40,
+   keys:gridKeys(40,10), rows:[[0,10,10],[10,10,10],[20,10,10],[30,10,10]], features:{}},
+  {id:'ortho5x12', name:'格子 5×12', note:'Preonic など', keyCount:60,
+   keys:gridKeys(60,12), rows:[[0,12,12],[12,12,12],[24,12,12],[36,12,12],[48,12,12]], features:{}}
+];
+/* ---------- 物理レイアウトの編集 ----------
+ * 単位は 1U = 100。幅・高さ・位置はすべてこの単位で持つ。 */
+
+/** キー i の大きさを変える。行内の後ろのキーは、増減した分だけ横にずらす */
+function resizeKeyAt(keys, i, w, h, pushRow){
+  const out = keys.map(k=>k.slice());
+  if(!out[i]) return out;
+  const oldW = out[i][0];
+  out[i][0] = Math.max(25, Math.round(w));
+  out[i][1] = Math.max(25, Math.round(h));
+  if(pushRow){
+    const d = out[i][0] - oldW;
+    const y = out[i][3];
+    out.forEach((k, j)=>{ if(j > i && k[3] === y) k[2] += d; });
+  }
+  return out;
+}
+/** キー i を動かす */
+function moveKeyAt(keys, i, x, y){
+  const out = keys.map(k=>k.slice());
+  if(!out[i]) return out;
+  out[i][2] = Math.max(0, Math.round(x));
+  out[i][3] = Math.max(0, Math.round(y));
+  return out;
+}
+/** 同じ行(Yが同じ)のキーを隙間なく詰め直す */
+function packRow(keys, i){
+  const out = keys.map(k=>k.slice());
+  if(!out[i]) return out;
+  const y = out[i][3];
+  const idx = out.map((k, j)=>[k, j]).filter(([k])=>k[3] === y).map(([, j])=>j)
+    .sort((a, b)=>out[a][2] - out[b][2]);
+  let x = out[idx[0]][2];
+  idx.forEach(j=>{ out[j][2] = x; x += out[j][0]; });
+  return out;
+}
+/** 重なっているキーの組を返す(編集後の確認用) */
+function findKeyOverlaps(keys){
+  const bad = [];
+  for(let a=0;a<keys.length;a++){
+    for(let b=a+1;b<keys.length;b++){
+      const A = keys[a], B = keys[b];
+      if(A[4] || B[4]) continue;           // 回転しているキーは対象外
+      if(A[2] < B[2]+B[0] && B[2] < A[2]+A[0] && A[3] < B[3]+B[1] && B[3] < A[3]+A[1]) bad.push([a, b]);
+    }
+  }
+  return bad;
+}
+/** 内蔵プロファイルを id で引く */
+function builtinProfile(id){ return BUILTIN_PROFILES.find(p=>p.id===id) || null; }
 /** 空のkeymapテキストを生成(新規キーボード用) */
 function makeEmptyKeymap(count){
   const row = Array(count).fill('&trans').join('  ');
@@ -1584,7 +1826,7 @@ const LS_TO_SYM = {N1:'EXCL',N2:'AT',N3:'HASH',N4:'DLLR',N5:'PRCNT',N6:'CARET',N
 MINUS:'UNDER',EQUAL:'PLUS',LBKT:'LBRC',RBKT:'RBRC',BSLH:'PIPE',SEMI:'COLON',SQT:'DQT',GRAVE:'TILDE',COMMA:'LT',DOT:'GT',FSLH:'QMARK'};
 
 /* ---------- JIS変換テーブル ----------
-   symJis: US記号キーコード → JIS環境で同じ記号を出すキーコード (単発置換)
+   symJis: US記号キーコード → JIS利用環境で同じ記号を出すキーコード (単発置換)
    tapJis: タップ位置(mod-morph不可)用: 非Shift面の記号を出す置換
    morphs: 素のキー(2記号持ち)用 mod-morph 定義 */
 const SYM_JIS = {
@@ -2213,7 +2455,7 @@ function genConf(c){
   return L.join('\n')+'\n';
 }
 
-/* ---------- 既定の環境構成 (計12レイヤー) ----------
+/* ---------- 既定の利用環境構成 (計12レイヤー) ----------
    USグループ:      fw 0-4  (US_01〜US_05)
    GENERALグループ: fw 5-6  (GEN_01:BT系 / GEN_02:マウス — US/JIS共有)
    JISグループ:     fw 7-11 (JIS_01〜JIS_05 = US_01〜US_05のJIS版) */
@@ -2232,7 +2474,7 @@ function convertAllToJis(state){
   return [...new Set(allWarns)];
 }
 
-/* ---------- 環境 / 共有レイヤー(動的) ---------- */
+/* ---------- 利用環境 / 共有レイヤー(動的) ---------- */
 function groupRanges(groups){
   const out=[]; let s=0;
   for(const g of (groups||[])){ out.push({name:g.name, count:g.count, start:s}); s += g.count; }
@@ -2318,48 +2560,41 @@ COMMA:[',','<'],DOT:['.','>'],FSLH:['/','?'],NUHS:['#','~'],NUBS:['\\','|']};
 const DE_CHARS = {N1:['1','!'],N2:['2','"'],N3:['3','§'],N4:['4','$'],N5:['5','%'],N6:['6','&'],N7:['7','/'],N8:['8','('],N9:['9',')'],N0:['0','='],
 MINUS:['ß','?'],EQUAL:['´','`'],LBKT:['ü','Ü'],RBKT:['+','*'],BSLH:['#',"'"],SEMI:['ö','Ö'],SQT:['ä','Ä'],GRAVE:['^','°'],
 COMMA:[',',';'],DOT:['.',':'],FSLH:['-','_'],NUBS:['<','>'],Y:['Z','Z'],Z:['Y','Y']};
-// Dvorak配列。記号だけでなく文字の並びそのものが異なる
-const DVORAK_CHARS = {
-N1:['1','!'],N2:['2','@'],N3:['3','#'],N4:['4','$'],N5:['5','%'],N6:['6','^'],N7:['7','&'],N8:['8','*'],N9:['9','('],N0:['0',')'],
-Q:["'",'"'],W:[',','<'],E:['.','>'],R:['P','P'],T:['Y','Y'],Y:['F','F'],U:['G','G'],I:['C','C'],O:['R','R'],P:['L','L'],
-A:['A','A'],S:['O','O'],D:['E','E'],F:['U','U'],G:['I','I'],H:['D','D'],J:['H','H'],K:['T','T'],L:['N','N'],
-Z:[';',':'],X:['Q','Q'],C:['J','J'],V:['K','K'],B:['X','X'],N:['B','B'],M:['M','M'],
-SEMI:['S','S'],SQT:['-','_'],LBKT:['/','?'],RBKT:['=','+'],
-COMMA:['W','W'],DOT:['V','V'],FSLH:['Z','Z'],MINUS:['[','{'],EQUAL:[']','}'],
-GRAVE:['`','~'],BSLH:['\\','|']};
 /* 文字キー(A〜Z)は、並びが同じ配列では「押した通りの文字」を補う。
  * 表示にも使うため大文字で持つ(&kp A を "A" と描くため)。 */
 (function fillLetters(){
   const LT = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'.split('');
-  [US_CHARS, JIS_CHARS, UK_CHARS, DE_CHARS, DVORAK_CHARS].forEach(tbl=>{
+  [US_CHARS, JIS_CHARS, UK_CHARS, DE_CHARS].forEach(tbl=>{
     LT.forEach(c=>{ if(!tbl[c]) tbl[c] = [c, c]; });
   });
 })();
-const LOCALE_CHARS = { us: US_CHARS, ansi: US_CHARS, jis: JIS_CHARS, uk: UK_CHARS, de: DE_CHARS, dvorak: DVORAK_CHARS };
+/* 変換の対象は「同じQWERTY系だが記号の位置とShift挙動が違う言語配列」に限る。
+ * Dvorakのように配置思想そのものが違う配列は、変換しても「同じ操作感」には
+ * ならないため対象外とする(このツールの狙いは利用環境の差を埋めること)。 */
+const LOCALE_CHARS = { us: US_CHARS, ansi: US_CHARS, jis: JIS_CHARS, uk: UK_CHARS, de: DE_CHARS };
 /** 画面表示や変換先の選択肢に使う配列規格の一覧 */
 const LOCALE_LIST = [
   {id:'us',   name:'US (ANSI)'},
   {id:'jis',  name:'JIS (日本語)'},
   {id:'uk',   name:'UK (ISO)'},
-  {id:'de',   name:'DE (ドイツ語 QWERTZ)'},
-  {id:'dvorak', name:'Dvorak'}
+  {id:'de',   name:'DE (ドイツ語 QWERTZ)'}
 ];
 /* ---------- 用語 ----------
  * 利用者向けの呼び名はここだけを直せば全体に反映される。
  * (データ構造側は group / shared のまま。表示名だけを差し替える) */
 const TERMS = {
-  env:      '環境',      // レイヤーのまとまり = キーボード配列 × OS
-  envs:     '環境',
+  env:      '利用環境',      // レイヤーのまとまり = キーボード配列 × OS
+  envs:     '利用環境',
   shared:   '共有レイヤー',
   base:     'ベース',
   sync:     '同期'
 };
 function term(k){ return TERMS[k] || k; }
 
-/* ---------- 環境間でのレイヤー参照の付け替え ----------
- * 環境ごとにレイヤー一式を持つとき、ある環境の中の「自分の記号レイヤーへ」
+/* ---------- 利用環境間でのレイヤー参照の付け替え ----------
+ * 利用環境ごとにレイヤー一式を持つとき、ある利用環境の中の「自分の記号レイヤーへ」
  * という参照は、同期先では「同期先の記号レイヤーへ」に置き換える必要がある。
- * ただし &to は「環境そのものを切り替える」用途とみなし、絶対指定として残す。 */
+ * ただし &to は「利用環境そのものを切り替える」用途とみなし、絶対指定として残す。 */
 const WITHIN_ENV_REFS = ['&mo','&tog','&sl','&lt','&lt_to_layer_0'];
 function remapWithinEnv(raw, offsetMap){
   const t = (raw||'').trim().split(/\s+/);
@@ -2372,7 +2607,7 @@ function remapWithinEnv(raw, offsetMap){
   t[1] = String(offsetMap[n]);
   return t.join(' ');
 }
-/** 環境Aのレイヤー範囲 → 環境Bのレイヤー範囲 の対応表を作る */
+/** 利用環境Aのレイヤー範囲 → 利用環境Bのレイヤー範囲 の対応表を作る */
 function buildEnvOffsetMap(srcRange, dstRange){
   const map = {};
   const n = Math.min(srcRange.count, dstRange.count);
@@ -2640,148 +2875,28 @@ function bindingLabel(raw, os){
 const DEFAULT_KEYMAP = `#include <behaviors.dtsi>
 #include <dt-bindings/zmk/bt.h>
 #include <dt-bindings/zmk/keys.h>
-#include <dt-bindings/zmk/pointing.h>
-
-&mt {
-    flavor = "balanced";
-    quick-tap-ms = <0>;
-};
-
-&trackball {
-    automouse-layer = <4>;
-    scroll-layers = <5>;
-
-    // arrows {
-    //     layers = <3>;
-    //     bindings =
-    //         <&kp RIGHT_ARROW>,
-    //         <&kp LEFT_ARROW>,
-    //         <&kp UP_ARROW>,
-    //         <&kp DOWN_ARROW>;
-
-    //     tick = <10>;
-    //     wait-ms = <5>;
-    //     tap-ms = <5>;
-    // };
-};
 
 / {
-    combos {
-        compatible = "zmk,combos";
-
-        tab {
-            bindings = <&kp TAB>;
-            key-positions = <11 12>;
-        };
-
-        shift_tab {
-            bindings = <&kp LS(TAB)>;
-            key-positions = <12 13>;
-        };
-
-        muhennkann {
-            bindings = <&to_layer_0 INT_MUHENKAN>;
-            key-positions = <11 10>;
-        };
-
-        double_quotation {
-            bindings = <&kp DOUBLE_QUOTES>;
-            key-positions = <20 21>;
-        };
-
-        eq {
-            bindings = <&kp EQUAL>;
-            key-positions = <24 25>;
-        };
-    };
-
-    macros {
-        to_layer_0: to_layer_0 {
-            compatible = "zmk,behavior-macro-one-param";
-            #binding-cells = <1>;
-            bindings = <&to 0 &macro_param_1to1 &kp MACRO_PLACEHOLDER>;
-            label = "TO_LAYER_0";
-        };
-    };
-
-    behaviors {
-        lt_to_layer_0: lt_to_layer_0 {
-            compatible = "zmk,behavior-hold-tap";
-            label = "LAYER_TAP_TO_0";
-            bindings = <&mo>, <&to_layer_0>;
-
-            #binding-cells = <2>;
-            tapping-term-ms = <200>;
-        };
-    };
-
     keymap {
         compatible = "zmk,keymap";
 
         default_layer {
             bindings = <
-&kp Q             &kp W         &kp E         &kp R                        &kp T                                                          &kp Y        &kp U  &lt 5 I    &kp O    &kp P
-&kp A             &kp S         &kp D         &kp F                        &kp G        &kp LS(LG(S))                      &kp MINUS      &kp H        &kp J  &kp K      &kp L    &kp SQT
-&mt LEFT_SHIFT Z  &kp X         &kp C         &kp V                        &kp B        &kp COLON                          &kp SEMICOLON  &kp N        &kp M  &kp COMMA  &kp DOT  &kp SLASH
-&kp LCTRL         &kp LEFT_WIN  &kp LEFT_ALT  &lt_to_layer_0 6 INT_HENKAN  &lt 2 SPACE  &lt_to_layer_0 3 INT_MUHENKAN      &kp BACKSPACE  &lt 1 ENTER                             &kp DEL
-            >;
-
-            sensor-bindings = <&inc_dec_kp PG_UP PAGE_DOWN>;
-        };
-
-        FUNCTION {
-            bindings = <
-&trans  &trans  &trans  &trans  &trans                       &kp F1  &kp F2  &kp F3  &kp F4  &kp F5
-&trans  &trans  &trans  &trans  &trans  &trans      &kp F13  &kp F6  &kp F7  &kp F8  &kp F9  &kp F10
-&trans  &trans  &trans  &trans  &trans  &trans      &trans   &trans  &trans  &trans  &trans  &kp F11
-&trans  &trans  &trans  &trans  &trans  &trans      &trans   &trans                          &kp F12
+            &kp ESC &kp N1 &kp N2 &kp N3 &kp N4 &kp N5 &kp N6 &kp N7 &kp N8 &kp N9 &kp N0 &kp MINUS &kp EQUAL &kp BSPC
+            &kp TAB &kp Q &kp W &kp E &kp R &kp T &kp Y &kp U &kp I &kp O &kp P &kp LBKT &kp RBKT &kp BSLH
+            &kp LCTRL &kp A &kp S &kp D &kp F &kp G &kp H &kp J &kp K &kp L &kp SEMI &kp SQT &kp RET
+            &kp LSHFT &kp Z &kp X &kp C &kp V &kp B &kp N &kp M &kp COMMA &kp DOT &kp FSLH &kp RSHFT
+            &kp LCTRL &kp LGUI &kp LALT &kp SPACE &kp RALT &kp RGUI &mo 1
             >;
         };
 
-        NUM {
+        fn_layer {
             bindings = <
-&kp MINUS                   &kp KP_NUMBER_7  &kp KP_NUMBER_8  &kp KP_NUMBER_9  &kp PLUS                                                   &kp CARET         &kp AMPERSAND      &kp TILDE       &kp LEFT_PARENTHESIS  &kp RIGHT_PARENTHESIS
-&kp SLASH                   &kp KP_NUMBER_4  &kp KP_NUMBER_5  &kp KP_NUMBER_6  &kp ASTERISK  &kp LC(LA(KP_NUMBER_0))      &kp UNDERSCORE  &kp EXCLAMATION   &kp AT_SIGN        &kp HASH        &kp DOLLAR            &kp PERCENT
-&mt LEFT_SHIFT KP_NUMBER_0  &kp KP_NUMBER_1  &kp KP_NUMBER_2  &kp KP_NUMBER_3  &kp PERIOD    &kp EQUAL                    &trans          &kp LEFT_BRACKET  &kp RIGHT_BRACKET  &kp LEFT_BRACE  &kp RIGHT_BRACE       &kp BACKSLASH
-&trans                      &trans           &trans           &trans           &trans        &trans                       &trans          &trans                                                                     &kp PIPE
-            >;
-        };
-
-        ARROW {
-            bindings = <
-&kp ESCAPE      &kp LC(LS(TAB))         &kp UP_ARROW    &kp LC(TAB)              &trans                       &trans  &trans  &trans  &trans  &trans
-&kp HOME        &kp LEFT_ARROW          &kp DOWN_ARROW  &kp RIGHT_ARROW          &kp END  &trans      &trans  &trans  &trans  &trans  &trans  &trans
-&kp LEFT_SHIFT  &kp LG(LS(LEFT_ARROW))  &trans          &kp LG(LS(RIGHT_ARROW))  &trans   &trans      &trans  &trans  &trans  &trans  &trans  &trans
-&trans          &trans                  &trans          &trans                   &trans   &trans      &trans  &trans                          &trans
-            >;
-
-            sensor-bindings = <&inc_dec_kp LC(PAGE_UP) LC(PAGE_DOWN)>;
-        };
-
-        MOUSE {
-            bindings = <
-&trans  &trans  &trans  &trans  &trans                      &trans  &trans    &trans    &trans    &trans
-&trans  &trans  &trans  &trans  &trans  &trans      &trans  &trans  &mkp MB1  &mkp MB3  &mkp MB2  &trans
-&trans  &trans  &trans  &trans  &trans  &trans      &trans  &trans  &trans    &trans    &trans    &trans
-&trans  &trans  &trans  &trans  &trans  &trans      &trans  &trans                                &trans
-            >;
-        };
-
-        SCROLL {
-            bindings = <
-&trans  &trans  &trans  &trans  &trans                      &trans  &trans  &trans  &trans  &trans
-&trans  &trans  &trans  &trans  &trans  &trans      &trans  &trans  &trans  &trans  &trans  &trans
-&trans  &trans  &trans  &trans  &trans  &trans      &trans  &trans  &trans  &trans  &trans  &trans
-&trans  &trans  &trans  &trans  &trans  &trans      &trans  &trans                          &trans
-            >;
-        };
-
-        layer_6 {
-            bindings = <
-&trans  &trans        &trans        &trans        &trans                           &bt BT_SEL 0  &bt BT_SEL 1  &bt BT_SEL 2  &bt BT_SEL 3  &bt BT_SEL 4
-&trans  &trans        &trans        &trans        &trans  &trans      &trans       &trans        &trans        &trans        &trans        &trans
-&trans  &kp NUMBER_1  &kp NUMBER_2  &kp NUMBER_3  &trans  &trans      &bootloader  &trans        &trans        &trans        &trans        &bt BT_CLR
-&trans  &trans        &trans        &trans        &trans  &trans      &trans       &trans                                                  &bt BT_CLR_ALL
+            &kp GRAVE &kp F1 &kp F2 &kp F3 &kp F4 &kp F5 &kp F6 &kp F7 &kp F8 &kp F9 &kp F10 &kp F11 &kp F12 &kp DEL
+            &kp CAPS &trans &trans &trans &trans &trans &trans &trans &trans &trans &kp PSCRN &kp UP &kp PG_UP &trans
+            &trans &trans &trans &trans &trans &trans &trans &trans &trans &trans &kp LEFT &kp RIGHT &trans
+            &trans &trans &trans &trans &trans &trans &trans &trans &trans &kp PG_DN &kp DOWN &trans
+            &bt BT_CLR &bt BT_SEL 0 &bt BT_SEL 1 &trans &kp C_VOL_DN &kp C_MUTE &trans
             >;
         };
     };
@@ -2821,7 +2936,7 @@ function convBindingFull(raw, srcLoc, dstLoc, srcOs, dstOs, shiftMode, morphSink
   return {raw:cur, warns, desc:descs.join(' / ')};
 }
 
-/* ----- 環境(グループ)の属性 -----
+/* ----- 利用環境(グループ)の属性 -----
  * 明示設定(locale/platform)が最優先。未設定の古いデータだけ名前から推測する。 */
 function localeOfGroup(groups, gi){
   const g = (groups||[])[gi];
@@ -2829,7 +2944,6 @@ function localeOfGroup(groups, gi){
   if(g.locale!==undefined) return g.locale;      // null は「設定なし」
   const n = (g.name||'').toUpperCase();
   if(n.indexOf('JIS')>=0) return 'jis';
-  if(n.indexOf('DVORAK')>=0) return 'dvorak';
   if(n.indexOf('UK')>=0) return 'uk';
   if(n==='DE' || n.indexOf('GERMAN')>=0) return 'de';
   if(n==='GEN' || n==='GENERAL' || n==='SHARED' || n==='COMMON') return null;
@@ -2847,22 +2961,22 @@ function platformOfGroup(groups, gi){
   return null;
 }
 
-/* ----- コンボの環境依存 -----
+/* ----- コンボの利用環境依存 -----
  * ZMKのコンボは既定で全レイヤーに効く。`layers` を指定すれば範囲を絞れるので、
- * 出力が環境で変わるコンボは環境ごとに分けて定義する。 */
+ * 出力が利用環境で変わるコンボは利用環境ごとに分けて定義する。 */
 
-/* ----- マクロ / tap-dance / 自作mod-morph の環境依存 -----
- * コンボと同じ問題。定義は1つなのに複数の環境から呼ばれるため、
- * 記号を出す定義は配列の違う環境で別の記号になる。
+/* ----- マクロ / tap-dance / 自作mod-morph の利用環境依存 -----
+ * コンボと同じ問題。定義は1つなのに複数の利用環境から呼ばれるため、
+ * 記号を出す定義は配列の違う利用環境で別の記号になる。
  * コンボと違い、レイヤーのバインディングから参照されるので、
  * 分割したら参照先も書き換える。 */
 
 /** 画面と警告文で使う種別の呼び名 */
 const BEH_KIND_LABEL = {morph:'mod-morph', td:'tap-dance', macro:'マクロ'};
-/** 自動生成した mod-morph は環境専用なので対象外にする */
+/** 自動生成した mod-morph は利用環境専用なので対象外にする */
 function isGeneratedMorph(name){ return /^jis_/.test(name||'') || /^loc_/.test(name||''); }
 
-/** 環境で変わりうる定義を集める。kind は 'morph' | 'td' | 'macro' */
+/** 利用環境で変わりうる定義を集める。kind は 'morph' | 'td' | 'macro' */
 function collectBehaviorDefs(state){
   const out = [];
   const b = state.behaviors || {};
@@ -2884,7 +2998,7 @@ function behaviorWithBindings(kind, def, name, arr){
   return Object.assign({}, def, {name,
     steps:(def.steps||[]).map((s,i)=> s.binding!==undefined? Object.assign({}, s, {binding:arr[i]}) : Object.assign({}, s))});
 }
-/** その定義を呼んでいる環境(グループ)の番号一覧 */
+/** その定義を呼んでいる利用環境(グループ)の番号一覧 */
 function envIndicesUsingBehavior(state, name){
   const rs = groupRanges(state.groups||[]);
   const tok = '&'+name;
@@ -2896,7 +3010,7 @@ function envIndicesUsingBehavior(state, name){
   });
   return [...set].sort((a,b)=>a-b);
 }
-/** 複数の環境から呼ばれていて、環境によって出力が変わる定義を洗い出す */
+/** 複数の利用環境から呼ばれていて、利用環境によって出力が変わる定義を洗い出す */
 function findBehaviorEnvIssues(state){
   const out = [];
   collectBehaviorDefs(state).forEach(d=>{
@@ -2917,8 +3031,8 @@ function findBehaviorEnvIssues(state){
   });
   return out;
 }
-/** 定義を環境ごとに複製し、その環境のレイヤーの参照先を差し替える。
- * 基準の環境はそのままにして、変更を最小限にする。作った名前を返す */
+/** 定義を利用環境ごとに複製し、その利用環境のレイヤーの参照先を差し替える。
+ * 基準の利用環境はそのままにして、変更を最小限にする。作った名前を返す */
 function splitBehaviorForEnvs(state, issue){
   const made = [];
   const rs = groupRanges(state.groups||[]);
@@ -2945,7 +3059,7 @@ function splitBehaviorForEnvs(state, issue){
   });
   return made;
 }
-/** そのコンボが効く環境(グループ)の番号一覧。layers未指定なら全環境。 */
+/** そのコンボが効く利用環境(グループ)の番号一覧。layers未指定なら全利用環境。 */
 function comboEnvIndices(combo, groups){
   const rs = groupRanges(groups||[]);
   if(!rs.length) return [];
@@ -2956,7 +3070,7 @@ function comboEnvIndices(combo, groups){
   return [...set].sort((a,b)=>a-b);
 }
 
-/** 基準の環境から見て、別の環境では出力が変わるコンボを洗い出す */
+/** 基準の利用環境から見て、別の利用環境では出力が変わるコンボを洗い出す */
 function findComboEnvIssues(groups, combos){
   const out = [];
   (combos||[]).forEach((c, ci)=>{
@@ -2977,7 +3091,7 @@ function findComboEnvIssues(groups, combos){
   return out;
 }
 
-/** 1つのコンボを環境ごとに分割する。元のコンボは基準環境に限定される。 */
+/** 1つのコンボを利用環境ごとに分割する。元のコンボは基準利用環境に限定される。 */
 function splitComboForEnvs(combo, groups){
   const rs = groupRanges(groups||[]);
   const envs = comboEnvIndices(combo, groups);
@@ -3198,21 +3312,21 @@ function runValidation(state, osTargets){
         + `「⇅ レイヤー順序を点検」で修正できます`);
     });
   })();
-  // コンボは全レイヤーで効くため、環境をまたぐと別の記号が出ることがある
+  // コンボは全レイヤーで効くため、利用環境をまたぐと別の記号が出ることがある
   findComboEnvIssues(state.groups||[], state.combos||[]).forEach(x=>{
-    issues.push(`⚠ コンボ "${x.name}" は ${x.baseName} 以外の環境では別の入力になります`
+    issues.push(`⚠ コンボ "${x.name}" は ${x.baseName} 以外の利用環境では別の入力になります`
       + `(${x.diffs.map(d=>d.name).join(' / ')})。`
-      + `「Combo」画面の「環境ごとに分ける」で修正できます`);
+      + `「Combo」画面の「利用環境ごとに分ける」で修正できます`);
   });
-  // マクロ等も複数の環境から呼ばれると、環境によって別の入力になる
+  // マクロ等も複数の利用環境から呼ばれると、利用環境によって別の入力になる
   findBehaviorEnvIssues(state).forEach(x=>{
-    issues.push(`⚠ ${BEH_KIND_LABEL[x.kind]||x.kind} "${x.name}" は ${x.baseName} 以外の環境では別の入力になります`
+    issues.push(`⚠ ${BEH_KIND_LABEL[x.kind]||x.kind} "${x.name}" は ${x.baseName} 以外の利用環境では別の入力になります`
       + `(${x.diffs.map(d=>d.name).join(' / ')})。`
-      + `「${BEH_KIND_LABEL[x.kind]||x.kind}」画面の「環境ごとに分ける」で修正できます`);
+      + `「${BEH_KIND_LABEL[x.kind]||x.kind}」画面の「利用環境ごとに分ける」で修正できます`);
   });
   findBaseTransIssues(state.groups||[], state.layers).forEach(x=>{
     issues.push(`⚠ ${x.groupName} の最初のレイヤーに透過(▽)が ${x.positions.length} 箇所あります(pos ${x.positions.slice(0,6).join(',')}${x.positions.length>6?'…':''})。`
-      + `レイヤー0は常に有効なため、その位置だけ最初の環境の割り当てが出てしまいます`);
+      + `レイヤー0は常に有効なため、その位置だけ最初の利用環境の割り当てが出てしまいます`);
   });
 
   // 使用OSで無反応になるキーコードの検出
@@ -3240,12 +3354,12 @@ function runValidation(state, osTargets){
   return [...new Set(issues)];
 }
 
-if (typeof module !== 'undefined') module.exports = {parseKeymap, generateKeymap, convBinding, convBindingUs, remapRefsOnly, normBinding, convertLayerToJis, convertAllToJis, groupRanges, gnameFor, buildJisMaps, nodeNameFor, parseHoldtapOne, patchHoldtapOne, parseStickyOne, patchStickyOne, parseMacros, genMacrosInner, parseMacroSteps, genMacroBindings, parseCondLayers, genCondLayersInner, charFor, TERMS, term, remapWithinEnv, buildEnvOffsetMap, WITHIN_ENV_REFS, layerRefTargets, findShadowedRefs, orderToFixShadowing, findBaseTransIssues, LOCALE_CHARS, LOCALE_LIST, localeIndex, getLocaleIndex, charOfKeycode, keycodeForChar, convBindingLocale, SYM_TO_LS, parseRepoRef, utf8ToBase64, base64ToUtf8, pickConfigFiles, I18N_EN, tr, setLang, getLang, OS_LIST, OS_COMPAT, OS_INDEX, keycodesIn, findOsIssues, fixOsIssues, PLATFORM_PAIRS, convBindingPlatform, canonBinding, usesMod, OS_FAMILY, platformDir, osName, swapMainMod, findWinIncompatible, fixWinIncompatible, KEYBOARD, ROBA_PROFILE, setKeyboard, getKeyboard, parsePhysicalLayout, deriveRows, gridKeys, makeEmptyKeymap, APP_VERSION, canon, kcLabel, MOD_LABELS, MOD_PREFIX, labelFamily, JIS_MAP, REV_MAP, US_TO_JIS_ORDER, tokenizeBindings, DEFAULT_KEYMAP, NUM_KEYS, bindingLabel, JIS_MORPHS, convBindingFull, localeOfGroup, platformOfGroup, comboEnvIndices, findComboEnvIssues, splitComboForEnvs, BEH_KIND_LABEL, isGeneratedMorph, collectBehaviorDefs, behaviorBindingsOf, behaviorWithBindings, envIndicesUsingBehavior, findBehaviorEnvIssues, splitBehaviorForEnvs, STATE_KEYS, pickState, runValidation, remapAllRefs, reorderLayers, orderForMove, orderForGroupMove, copyLayerAt, deleteLayerAt, moveLayerAt, addLayerAt, swapGroups, permuteGroups, parseCombos, parseBehaviors, parseTrackball, patchTrackball, genConf, CONF_DEFAULTS, PHYS};
+if (typeof module !== 'undefined') module.exports = {parseKeymap, generateKeymap, convBinding, convBindingUs, remapRefsOnly, normBinding, convertLayerToJis, convertAllToJis, groupRanges, gnameFor, buildJisMaps, nodeNameFor, parseHoldtapOne, patchHoldtapOne, parseStickyOne, patchStickyOne, parseMacros, genMacrosInner, parseMacroSteps, genMacroBindings, parseCondLayers, genCondLayersInner, charFor, TERMS, term, remapWithinEnv, buildEnvOffsetMap, WITHIN_ENV_REFS, layerRefTargets, findShadowedRefs, orderToFixShadowing, findBaseTransIssues, LOCALE_CHARS, LOCALE_LIST, localeIndex, getLocaleIndex, charOfKeycode, keycodeForChar, convBindingLocale, SYM_TO_LS, parseRepoRef, utf8ToBase64, base64ToUtf8, pickConfigFiles, I18N_EN, tr, setLang, getLang, OS_LIST, OS_COMPAT, OS_INDEX, keycodesIn, findOsIssues, fixOsIssues, PLATFORM_PAIRS, convBindingPlatform, canonBinding, usesMod, OS_FAMILY, platformDir, osName, swapMainMod, findWinIncompatible, fixWinIncompatible, KEYBOARD, ROBA_PROFILE, BUILTIN_PROFILES, builtinProfile, setKeyboard, getKeyboard, parsePhysicalLayout, parsePhysicalLayouts, looksLikeLayoutFile, layoutScanOrder, deriveRows, gridKeys, makeEmptyKeymap, APP_VERSION, canon, kcLabel, MOD_LABELS, MOD_PREFIX, labelFamily, JIS_MAP, REV_MAP, US_TO_JIS_ORDER, tokenizeBindings, DEFAULT_KEYMAP, NUM_KEYS, bindingLabel, JIS_MORPHS, convBindingFull, localeOfGroup, platformOfGroup, comboEnvIndices, findComboEnvIssues, splitComboForEnvs, BEH_KIND_LABEL, isGeneratedMorph, collectBehaviorDefs, behaviorBindingsOf, behaviorWithBindings, envIndicesUsingBehavior, findBehaviorEnvIssues, splitBehaviorForEnvs, STATE_KEYS, pickState, runValidation, remapAllRefs, reorderLayers, orderForMove, orderForGroupMove, resizeKeyAt, moveKeyAt, packRow, findKeyOverlaps, copyLayerAt, deleteLayerAt, moveLayerAt, addLayerAt, swapGroups, permuteGroups, parseCombos, parseBehaviors, parseTrackball, patchTrackball, genConf, CONF_DEFAULTS, PHYS};
 </script>
 
 <script>
 /* ================= UI =================
- * セクション: state管理(save/load/migrate/Undo) / 環境・レイヤー操作 /
+ * セクション: state管理(save/load/migrate/Undo) / 利用環境・レイヤー操作 /
  * 盤面描画 / ピッカー / 変換ダイアログ / 各機能モーダル(Combo,Mod-Morph,
  * Tap-Dance,Hold-Tap,Macro,CondLayer,全体調整,トラックボール) /
  * バックアップ・検証 / チートシート / テーマ・ヘルプ / 初期化
@@ -3260,8 +3374,14 @@ let wrapMods = new Set();
 /* ----- キーボードプロファイル管理 ----- */
 function kbLibLoad(){ try{ return JSON.parse(localStorage.getItem('roba_kb_profiles_v1')||'[]'); }catch(e){ return []; } }
 function kbLibSave(lib){ try{ localStorage.setItem('roba_kb_profiles_v1', JSON.stringify(lib)); }catch(e){} }
+/** キー数からキーボードを推測する。
+ * 読み込んだ .keymap のキー数に合う盤面を自動で選ぶために使う。
+ * いま選んでいるもの → 内蔵プロファイル → 自作プロファイル の順に探し、
+ * どれにも当てはまらなければ格子で代用する。 */
 function pickKeyboardFor(count){
-  if(ROBA_PROFILE.keyCount===count) return ROBA_PROFILE;
+  if(KEYBOARD && KEYBOARD.keyCount===count) return KEYBOARD;
+  const b = BUILTIN_PROFILES.find(k=>k.keyCount===count);
+  if(b) return b;
   const hit = kbLibLoad().find(k=>k.keyCount===count);
   if(hit) return hit;
   return {id:'grid'+count, name:'汎用 '+count+'キー', keyCount:count, keys:gridKeys(count), rows:null, features:{}};
@@ -3338,7 +3458,7 @@ function renameGroup(gi, newName){
   const old = state.groups[gi].name;
   if(name===old) return;
   if(state.groups.some((g,k)=>k!==gi && g.name===name)){ alert('同名のグループがあります'); return; }
-  if((old==='US'||old==='JIS') && !confirm(`「${old}」はUS⇄JIS変換が対象とする名前です。変更するとその機能が使えなくなります(環境間の同期は引き続き使えます)。続行しますか?`)) return;
+  if((old==='US'||old==='JIS') && !confirm(`「${old}」はUS⇄JIS変換が対象とする名前です。変更するとその機能が使えなくなります(利用環境間の同期は引き続き使えます)。続行しますか?`)) return;
   state.groups[gi].name = name;
 }
 function moveGroup(gi, dir){
@@ -3488,7 +3608,7 @@ let layerDragIdx = null, groupDragGi = null;
 /** グループの配列規格。未設定なら名前から推測(US/JIS など従来の運用と互換) */
 function groupLocale(gi){ return localeOfGroup(state.groups, gi); }
 function groupPlatform(gi){ return platformOfGroup(state.groups, gi); }
-/** 環境の設定(配列 × OS)を短く言い表す */
+/** 利用環境の設定(配列 × OS)を短く言い表す */
 function localeName(id, short){
   const n = id? ((LOCALE_LIST.find(l=>l.id===id)||{}).name || id) : null;
   // チップに収まるよう、短縮時は補足の括弧を落とす: 「JIS (日本語)」→「JIS」
@@ -3519,7 +3639,7 @@ function envSetNote(){
   const el = document.getElementById('es-note');
   if(!loc && !os){
     el.textContent = 'どちらも「設定なし」です。変換の対象外になるため、'
-      + 'どの環境からも呼び出す共通の層として使えます（マウスやBluetoothなど）。';
+      + 'どの利用環境からも呼び出す共通の層として使えます（マウスやBluetoothなど）。';
     return;
   }
   const other = state.groups.map((g,i)=>i).filter(i=>i!==envSetGi
@@ -3531,7 +3651,7 @@ function envSetNote(){
   });
   el.textContent = same.length
     ? `${same.map(i=>state.groups[i].name).join(' / ')} と同じ設定です。同期しても変換は起きません。`
-    : '「⇆ 環境間の同期」で、他の環境からこの設定に合わせて変換できます。';
+    : '「⇆ 利用環境間の同期」で、他の利用環境からこの設定に合わせて変換できます。';
 }
 document.getElementById('es-save').onclick = ()=>{
   if(envSetGi < 0) return;
@@ -3548,10 +3668,10 @@ document.getElementById('es-save').onclick = ()=>{
     const s = envSummary(state.groups.findIndex(x=>x.name===nm), true);
     document.getElementById('warnings').innerHTML = '<div class="warnbox">'
       + esc(`✅ 「${nm}」の設定を ${s.text} にしました。配置は変えていません。`
-            + `他の環境から合わせるには「⇆ 環境間の同期」を使ってください。`)+'</div>';
+            + `他の利用環境から合わせるには「⇆ 利用環境間の同期」を使ってください。`)+'</div>';
   }
 };
-/** グループの数。1以下なら環境まわりのUIを隠す */
+/** グループの数。1以下なら利用環境まわりのUIを隠す */
 function envCount(){ return (state.groups||[]).length; }
 function isSimpleMode(){ return envCount() <= 1; }
 function groupIndexOfLayer(i){
@@ -3564,7 +3684,7 @@ function layerLocale(i){
   const loc = gi>=0? groupLocale(gi) : null;
   return loc || 'us';   // 設定なしのときはキーコード名どおり(US相当)で表示する
 }
-/** そのレイヤーが属する環境のOS。未設定なら null(キーコード名どおりの表示) */
+/** そのレイヤーが属する利用環境のOS。未設定なら null(キーコード名どおりの表示) */
 function layerPlatform(i){
   const gi = groupIndexOfLayer(i);
   return gi>=0? groupPlatform(gi) : null;
@@ -3790,7 +3910,7 @@ function renderLayers(){
     const cls = r.name==='US'?'us': r.name==='JIS'?'jis': r.name==='GEN'?'gen':'oth';
     const gcol = state.groups[gi].color || null;
     const s=document.createElement('span'); s.className='lsep '+cls; s.textContent=r.name;
-    s.title = '環境(キーボード配列 × OS) / ダブルクリックで名前変更';
+    s.title = '利用環境(キーボード配列 × OS) / ダブルクリックで名前変更';
     s.style.cursor = 'pointer';
     if(gcol){ s.style.color = gcol; s.style.borderLeftColor = gcol; }
     if(simple) s.style.display = 'none';
@@ -3834,11 +3954,11 @@ function renderLayers(){
     const neutral = !loc && !os;
     const role = document.createElement('span');
     role.className = 'envrole ' + (neutral? 'shared':'base');
-    role.textContent = neutral? '設定なし' : (gi===0? 'ベース' : '環境');
+    role.textContent = neutral? '設定なし' : (gi===0? 'ベース' : '利用環境');
     if(simple) role.style.display = 'none';
     role.title = neutral
-      ? '配列もOSも設定されていません。変換の対象外になるので、どの環境からも呼び出す層に向いています'
-      : (gi===0? '起動時に有効になる環境。ここを基準に他の環境を作ります' : '同期で作られる環境');
+      ? '配列もOSも設定されていません。変換の対象外になるので、どの利用環境からも呼び出す層に向いています'
+      : (gi===0? '起動時に有効になる利用環境。ここを基準に他の利用環境を作ります' : '同期で作られる利用環境');
     row.appendChild(role);
     // 設定(配列 × OS)。クリックでその場で変更できる
     const chip = document.createElement('span');
@@ -3857,7 +3977,7 @@ function renderLayers(){
       const locName = loc? ((LOCALE_LIST.find(l=>l.id===loc)||{}).name || loc) : '配列なし';
       const osName = os? (({win:'Windows',mac:'macOS',linux:'Linux'})[os]||os) : '';
       meta.textContent = locName + (osName? ' · '+osName : '');
-      meta.title = 'キーボード配列(OSの設定) と OS。「⇆ 環境間の同期」で設定できます';
+      meta.title = 'キーボード配列(OSの設定) と OS。「⇆ 利用環境間の同期」で設定できます';
       if(simple) meta.style.display = 'none';
       row.appendChild(meta);
     }
@@ -3938,10 +4058,10 @@ function renderLayers(){
   grow.className = 'lrow';
   const gadd = document.createElement('button');
   gadd.className = 'gbtn';
-  gadd.textContent = '＋ 環境';
+  gadd.textContent = '＋ 利用環境';
   gadd.title = isSimpleMode()
-    ? '別のキーボード配列やOS向けの環境を追加します（複数の機種で同じ操作感にしたいとき）'
-    : '環境(または共有レイヤー)を末尾に追加';
+    ? '別のキーボード配列やOS向けの利用環境を追加します（複数の機種で同じ操作感にしたいとき）'
+    : '利用環境(または共有レイヤー)を末尾に追加';
   gadd.onclick = addGroupFlow;
   grow.appendChild(gadd);
   grow.ondragover = e=>{ if(groupDragGi!==null){ e.preventDefault(); e.dataTransfer.dropEffect='move'; grow.classList.add('ginsert'); } };
@@ -3977,7 +4097,7 @@ function renderAll(){
   if(co){ co.textContent = '⊞ Combo表示: '+(comboOverlay?'ON':'OFF'); co.classList.toggle('shifton', comboOverlay); }
   const tbb = document.getElementById('btn-trackball');
   if(tbb) tbb.style.display = (state.keyboard && state.keyboard.features && state.keyboard.features.trackball)? '' : 'none';
-  // 環境が1つだけなら、環境まわりの機能は見せない
+  // 利用環境が1つだけなら、利用環境まわりの機能は見せない
   const simpleNow = isSimpleMode();
   ['btn-platform','btn-switcher','btn-order'].forEach(id=>{
     const el = document.getElementById(id);
@@ -4538,7 +4658,7 @@ function applyRenameCombo(oldName, newName){
   if(c) c.name = name;
   save(); renderCombos();
 }
-/** マクロ等が環境で別の入力になる場合に知らせ、その場で分割できるようにする */
+/** マクロ等が利用環境で別の入力になる場合に知らせ、その場で分割できるようにする */
 function renderBehEnvWarn(boxId, kind){
   const box = document.getElementById(boxId);
   if(!box) return;
@@ -4551,8 +4671,8 @@ function renderBehEnvWarn(boxId, kind){
   d.className = 'warnbox';
   d.style.marginBottom = '8px';
   const head = document.createElement('div');
-  head.innerHTML = `この${esc(label)}は<b>複数の環境から呼ばれています</b>が、環境によって別の入力になります（${issues.length}件）。`
-    + `環境ごとに分けると、それぞれで同じ文字が出るようになります。`;
+  head.innerHTML = `この${esc(label)}は<b>複数の利用環境から呼ばれています</b>が、利用環境によって別の入力になります（${issues.length}件）。`
+    + `利用環境ごとに分けると、それぞれで同じ文字が出るようになります。`;
   d.appendChild(head);
   issues.forEach(x=>{
     const li = document.createElement('div');
@@ -4567,15 +4687,15 @@ function renderBehEnvWarn(boxId, kind){
   act.style.marginTop = '6px';
   const btn = document.createElement('button');
   btn.className = 'primary';
-  btn.textContent = '環境ごとに分ける';
-  btn.title = '環境の数だけ定義を複製し、その環境のレイヤーの参照先も差し替えます';
+  btn.textContent = '利用環境ごとに分ける';
+  btn.title = '利用環境の数だけ定義を複製し、その利用環境のレイヤーの参照先も差し替えます';
   btn.onclick = ()=>{
     const list = findBehaviorEnvIssues(state).filter(x=>x.kind===kind);
     let made = [];
     list.slice().reverse().forEach(x=>{ made = made.concat(splitBehaviorForEnvs(state, x)); });
     renderAll(); renderBehs(); renderMacros();
     document.getElementById('warnings').innerHTML = '<div class="warnbox">'
-      + esc(`✅ ${label} ${list.length} 件を環境ごとに分けました（${made.join(', ')} を追加し、参照先も差し替えました）。`)+'</div>';
+      + esc(`✅ ${label} ${list.length} 件を利用環境ごとに分けました（${made.join(', ')} を追加し、参照先も差し替えました）。`)+'</div>';
   };
   act.appendChild(btn);
   d.appendChild(act);
@@ -4592,8 +4712,8 @@ function renderComboEnvWarn(){
   d.className = 'warnbox';
   d.style.marginBottom = '8px';
   const head = document.createElement('div');
-  head.innerHTML = `コンボは<b>全レイヤーで動く</b>ため、環境をまたぐと別の入力になるものがあります（${issues.length}件）。`
-    + `環境ごとに分けると、それぞれで同じ文字が出るようになります。`;
+  head.innerHTML = `コンボは<b>全レイヤーで動く</b>ため、利用環境をまたぐと別の入力になるものがあります（${issues.length}件）。`
+    + `利用環境ごとに分けると、それぞれで同じ文字が出るようになります。`;
   d.appendChild(head);
   issues.forEach(x=>{
     const li = document.createElement('div');
@@ -4607,8 +4727,8 @@ function renderComboEnvWarn(){
   act.style.marginTop = '6px';
   const btn = document.createElement('button');
   btn.className = 'primary';
-  btn.textContent = '環境ごとに分ける';
-  btn.title = 'コンボを環境の数だけ複製し、それぞれに layers 指定と変換後の動作を設定します';
+  btn.textContent = '利用環境ごとに分ける';
+  btn.title = 'コンボを利用環境の数だけ複製し、それぞれに layers 指定と変換後の動作を設定します';
   btn.onclick = ()=>{
     const list = findComboEnvIssues(state.groups||[], state.combos||[]);
     if(!list.length) return;
@@ -4622,7 +4742,7 @@ function renderComboEnvWarn(){
     cbEditIdx = -1;
     renderAll(); renderCombos(); renderComboEnvWarn();
     document.getElementById('warnings').innerHTML = '<div class="warnbox">'
-      + esc(`✅ コンボ ${list.length} 件を環境ごとに分けました（合計 ${made} 件になりました）。`)+'</div>';
+      + esc(`✅ コンボ ${list.length} 件を利用環境ごとに分けました（合計 ${made} 件になりました）。`)+'</div>';
   };
   act.appendChild(btn);
   d.appendChild(act);
@@ -5692,9 +5812,9 @@ document.getElementById('plat-exec').onclick = ()=>{
   document.getElementById('warnings').innerHTML = '<div class="warnbox">'+esc(msg)+'</div>';
 };
 
-/* ----- 環境切り替えキーの配置 ----- */
-let swSel = {};        // 環境インデックス → キー位置
-let swPos = null;      // いま位置を選ぼうとしている環境
+/* ----- 利用環境切り替えキーの配置 ----- */
+let swSel = {};        // 利用環境インデックス → キー位置
+let swPos = null;      // いま位置を選ぼうとしている利用環境
 function swEnvGroups(){
   return groupRanges(state.groups||[]).map((r,gi)=>({r, gi}));
 }
@@ -5703,7 +5823,7 @@ function renderSwAssign(){
   el.innerHTML = '';
   const envs = swEnvGroups();
   if(envs.length < 2){
-    el.innerHTML = '<div class="warnbox">'+esc('環境が1つだけのため、切り替えキーは必要ありません。複数の環境を作ると使えるようになります。')+'</div>';
+    el.innerHTML = '<div class="warnbox">'+esc('利用環境が1つだけのため、切り替えキーは必要ありません。複数の利用環境を作ると使えるようになります。')+'</div>';
     return;
   }
   const useBt = document.getElementById('sw-bt').checked;
@@ -5780,7 +5900,7 @@ document.getElementById('sw-apply').onclick = ()=>{
   const envs = swEnvGroups();
   const chosen = envs.filter(({gi})=>swSel[gi]!==undefined);
   if(chosen.length < 2){
-    document.getElementById('sw-msg').textContent = '2つ以上の環境にキー位置を指定してください';
+    document.getElementById('sw-msg').textContent = '2つ以上の利用環境にキー位置を指定してください';
     return;
   }
   const li = Number(document.getElementById('sw-layer').value);
@@ -5806,9 +5926,9 @@ document.getElementById('sw-apply').onclick = ()=>{
   closeModal('sw-bg');
   renderAll();
   document.getElementById('warnings').innerHTML = '<div class="warnbox">'
-    + esc(`✅ ${gname(li)} ${state.layers[li].name} に環境切り替えキーを配置しました（${placed.join(' / ')}）。`
+    + esc(`✅ ${gname(li)} ${state.layers[li].name} に利用環境切り替えキーを配置しました（${placed.join(' / ')}）。`
       + (useBt? ' Bluetoothプロファイルの切り替えを含むマクロを作成しました。' : '')
-      + ' 電源を入れ直すと最初の環境に戻ります。')+'</div>';
+      + ' 電源を入れ直すと最初の利用環境に戻ります。')+'</div>';
 };
 
 /* ----- レイヤー順序の点検 ----- */
@@ -5820,7 +5940,7 @@ function renderOrderCheck(){
   const sh = findShadowedRefs(state.groups||[], state.layers);
   const trs = findBaseTransIssues(state.groups||[], state.layers);
   if(!sh.length && !trs.length){
-    list.innerHTML = '<div class="warnbox">'+esc('✅ 問題は見つかりませんでした。どの環境に切り替えても、呼び出したレイヤーは正しく動作します。')+'</div>';
+    list.innerHTML = '<div class="warnbox">'+esc('✅ 問題は見つかりませんでした。どの利用環境に切り替えても、呼び出したレイヤーは正しく動作します。')+'</div>';
     return;
   }
   const grouped = new Map();
@@ -5845,7 +5965,7 @@ function renderOrderCheck(){
     d.innerHTML = `<span class="lname" style="color:var(--warn)">注意</span>`
       + `<span><b>${esc(x.groupName)}</b> の最初のレイヤーに透過(▽)が <b>${x.positions.length}箇所</b> あります`
       + `<span class="dimtxt">（pos ${esc(x.positions.slice(0,8).join(', '))}${x.positions.length>8?' …':''}）</span><br>`
-      + `<span class="dimtxt">レイヤー0は常に有効なため、この位置だけ最初の環境の割り当てが出てしまいます。`
+      + `<span class="dimtxt">レイヤー0は常に有効なため、この位置だけ最初の利用環境の割り当てが出てしまいます。`
       + `意図した動作でなければ、キーを直接割り当ててください。</span></span>`;
     list.appendChild(d);
   });
@@ -6118,7 +6238,7 @@ function renderKbModal(){
   const el = document.getElementById('kb-list');
   el.innerHTML = '';
   const lib = kbLibLoad();
-  const rows = [{p:ROBA_PROFILE, builtin:true}, ...lib.map(p=>({p, builtin:false}))];
+  const rows = [...BUILTIN_PROFILES.map(p=>({p, builtin:true})), ...lib.map(p=>({p, builtin:false}))];
   rows.forEach(({p, builtin})=>{
     const d = document.createElement('div');
     d.className = 'listrow'+(p.id===state.keyboard.id?' editing':'');
@@ -6132,7 +6252,7 @@ function renderKbModal(){
     });
     d.appendChild(nm);
     const sp = document.createElement('span');
-    sp.innerHTML = `<b>${p.keyCount}キー</b>` + (p.features && p.features.trackball? ' <span class="dimtxt">トラックボール対応</span>':'') + (builtin? ' <span class="dimtxt">内蔵</span>':'');
+    sp.innerHTML = `<b>${p.keyCount}キー</b>` + (p.note? ` <span class="dimtxt">${esc(p.note)}</span>`:'') + (p.features && p.features.trackball? ' <span class="dimtxt">トラックボール対応</span>':'') + (builtin? ' <span class="dimtxt">内蔵</span>':'');
     d.appendChild(sp);
     const g = document.createElement('span'); g.className='grow'; d.appendChild(g);
     if(p.id!==state.keyboard.id){
@@ -6141,6 +6261,11 @@ function renderKbModal(){
       bu.onclick = ()=>switchKeyboard(p);
       d.appendChild(bu);
     }
+    const be = document.createElement('button');
+    be.textContent = builtin? '形を複製して編集' : '形を編集';
+    be.title = 'キーの大きさや位置を整えます（割り当ては変わりません）';
+    be.onclick = ()=>openKbEditor(p);
+    d.appendChild(be);
     const bn = document.createElement('button'); bn.textContent='新規作成';
     bn.title = 'このキーボード用の空のキーマップを新しく作ります';
     bn.onclick = ()=>newDocWith(p);
@@ -6157,6 +6282,200 @@ function renderKbModal(){
     el.appendChild(d);
   });
 }
+/* ----- GitHubからレイアウトを取り込む ----- */
+function kbSay(msg, isError){
+  const el = document.getElementById('kb-repo-result');
+  el.innerHTML = msg? '<div class="warnbox"'+(isError? ' style="border-color:var(--danger)"':'')+'>'+esc(msg)+'</div>' : '';
+}
+const KB_SCAN_LIMIT = 150;  // 調べるファイル数の上限
+/** ファイルの中身を取る。公開リポジトリは raw から(APIの回数を使わない)、
+ * 取れなければ Contents API に切り替える(非公開リポジトリ用) */
+async function ghFileText(owner, repo, branch, path){
+  try{
+    const r = await fetch(`https://raw.githubusercontent.com/${owner}/${repo}/${encodeURIComponent(branch)}/${encodeURI(path)}`);
+    if(r.ok) return await r.text();
+  }catch(e){ /* 非公開などで取れない場合はAPIへ */ }
+  const f = await ghFetch(`/repos/${owner}/${repo}/contents/${encodeURI(path)}?ref=${encodeURIComponent(branch)}`);
+  return base64ToUtf8((f.content||'').replace(/\n/g,''));
+}
+document.getElementById('kb-repo-find').onclick = async ()=>{
+  const ref = parseRepoRef(document.getElementById('kb-repo').value);
+  if(!ref){ kbSay('リポジトリは「owner/repo」またはGitHubのURLで指定してください。', true); return; }
+  const saved = ghSettingsLoad();
+  const prevOwner = ghState.owner, prevRepo = ghState.repo, prevBranch = ghState.branch;
+  ghState.owner = ref.owner; ghState.repo = ref.repo;
+  if(!ghState.token && saved.token) ghState.token = saved.token;
+  kbSay('リポジトリの中身を調べています…');
+  try{
+    let tree = null;
+    for(const br of ['main', 'master']){
+      try{
+        tree = await ghFetch(`/repos/${ref.owner}/${ref.repo}/git/trees/${br}?recursive=1`);
+        ghState.branch = br;
+        break;
+      }catch(e){ if(br === 'master') throw e; }
+    }
+    const cands = layoutScanOrder(
+      (tree.tree||[]).filter(x=>x.type==='blob' && looksLikeLayoutFile(x.path)).map(x=>x.path));
+    if(!cands.length){ kbSay('レイアウト定義が入っていそうなファイルが見つかりませんでした。', true); return; }
+    const scan = cands.slice(0, KB_SCAN_LIMIT);
+    const found = [];
+    const seen = new Set();
+    for(let i=0;i<scan.length;i++){
+      if(i % 5 === 0) kbSay(`調べています… ${i+1} / ${scan.length}（見つかった数: ${found.length}）`);
+      try{
+        const text = await ghFileText(ref.owner, ref.repo, ghState.branch, scan[i]);
+        parsePhysicalLayouts(text).forEach(L=>{
+          // 同じ名前・同じキー数のものが複数ファイルに出ることがあるのでまとめる
+          const key = L.name+'/'+L.keyCount;
+          if(seen.has(key)) return;
+          seen.add(key);
+          found.push(Object.assign({path:scan[i]}, L));
+        });
+      }catch(e){ /* 読めないファイルは飛ばす */ }
+    }
+    found.sort((a,b)=> a.name<b.name? -1 : a.name>b.name? 1 : 0);
+    renderKbFound(found, cands.length > scan.length ? cands.length - scan.length : 0);
+  }catch(e){
+    kbSay('取り込めませんでした: '+e.message, true);
+  }finally{
+    ghState.owner = prevOwner; ghState.repo = prevRepo; ghState.branch = prevBranch;
+  }
+};
+function renderKbFound(found, skipped){
+  const el = document.getElementById('kb-repo-result');
+  el.innerHTML = '';
+  if(!found.length){ kbSay('物理レイアウトの定義は見つかりませんでした。', true); return; }
+  const head = document.createElement('div');
+  head.className = 'hint';
+  head.style.margin = '4px 0';
+  head.textContent = `${found.length} 件見つかりました。`
+    + (skipped? `（ファイルが多いため ${skipped} 件は調べていません）` : '');
+  el.appendChild(head);
+  found.forEach(L=>{
+    const d = document.createElement('div');
+    d.className = 'listrow';
+    const nm = document.createElement('span');
+    nm.className = 'lname';
+    nm.textContent = L.name;
+    d.appendChild(nm);
+    const sp = document.createElement('span');
+    sp.innerHTML = `<b>${L.keyCount}キー</b> <span class="dimtxt">${esc(L.path)}</span>`;
+    d.appendChild(sp);
+    const g = document.createElement('span'); g.className='grow'; d.appendChild(g);
+    const b = document.createElement('button');
+    b.textContent = '追加';
+    b.onclick = ()=>{
+      const lib = kbLibLoad();
+      let id = 'gh_'+(L.node||'layout')+'_'+L.keyCount, n = 2;
+      while(lib.some(x=>x.id===id) || BUILTIN_PROFILES.some(x=>x.id===id)) id = 'gh_'+(L.node||'layout')+'_'+L.keyCount+'_'+(n++);
+      let name = L.name, k = 2;
+      while(lib.some(x=>x.name===name) || BUILTIN_PROFILES.some(x=>x.name===name)) name = L.name+' ('+(k++)+')';
+      lib.push({id, name, note:L.path, keyCount:L.keyCount, keys:L.keys,
+                rows:deriveRows(L.keys), features:{}});
+      kbLibSave(lib);
+      renderKbModal();
+      kbSay(`「${name}」を追加しました。一覧から「使用」または「新規作成」を選んでください。`);
+    };
+    d.appendChild(b);
+    el.appendChild(d);
+  });
+}
+
+/* ----- キーの大きさと位置の編集 ----- */
+let kbeKeys = null, kbeSel = -1, kbeTarget = null, kbeBuiltin = false;
+function openKbEditor(p){
+  kbeTarget = p;
+  kbeBuiltin = BUILTIN_PROFILES.some(x=>x.id===p.id);
+  kbeKeys = p.keys.map(k=>k.slice());
+  kbeSel = -1;
+  document.getElementById('kbe-name').textContent = p.name + (kbeBuiltin? '（内蔵 — 保存すると複製されます）' : '');
+  renderKbEditor();
+  document.getElementById('kbedit-bg').classList.add('open');
+}
+function renderKbEditor(){
+  const bd = document.getElementById('kbe-board');
+  bd.innerHTML = '';
+  const S = 0.34;
+  let maxX=0, maxY=0;
+  kbeKeys.forEach(k=>{ maxX=Math.max(maxX,k[2]+k[0]); maxY=Math.max(maxY,k[3]+k[1]); });
+  bd.style.width = (maxX*S+10)+'px';
+  bd.style.height = (maxY*S+16)+'px';
+  kbeKeys.forEach((k,i)=>{
+    const el = document.createElement('div');
+    el.className = 'mkey'+(i===kbeSel? ' sel':'');
+    el.style.width = (k[0]*S-2)+'px';
+    el.style.height = (k[1]*S-2)+'px';
+    el.style.left = (k[2]*S)+'px';
+    el.style.top = (k[3]*S)+'px';
+    if(k[4]){ el.style.transformOrigin = ((k[5]-k[2])*S)+'px '+((k[6]-k[3])*S)+'px';
+              el.style.transform = 'rotate('+(k[4]/100)+'deg)'; }
+    el.textContent = String(i);
+    el.title = `pos ${i} / ${k[0]/100}U × ${k[1]/100}U`;
+    el.onclick = ()=>{ kbeSel = i; renderKbEditor(); };
+    bd.appendChild(el);
+  });
+  const s = kbeKeys[kbeSel];
+  document.getElementById('kbe-sel').textContent = s? ('pos '+kbeSel) : 'なし';
+  ['kbe-w','kbe-h','kbe-x','kbe-y'].forEach((id,n)=>{
+    const el = document.getElementById(id);
+    el.value = s? (s[[0,1,2,3][n]]/100) : '';
+    el.disabled = !s;
+  });
+  const ov = findKeyOverlaps(kbeKeys);
+  document.getElementById('kbe-warn').innerHTML = ov.length
+    ? `⚠ キーが重なっています（${ov.slice(0,4).map(([a,b])=>a+'と'+b).join('、')}${ov.length>4?' ほか':''}）。「この行を詰め直す」で整えられます。`
+    : '';
+}
+function kbeApply(){
+  if(kbeSel < 0) return;
+  const num = id=>{ const v = parseFloat(document.getElementById(id).value); return isFinite(v)? v : null; };
+  const w = num('kbe-w'), h = num('kbe-h'), x = num('kbe-x'), y = num('kbe-y');
+  if(w!==null && h!==null)
+    kbeKeys = resizeKeyAt(kbeKeys, kbeSel, w*100, h*100, document.getElementById('kbe-push').checked);
+  if(x!==null && y!==null) kbeKeys = moveKeyAt(kbeKeys, kbeSel, x*100, y*100);
+  renderKbEditor();
+}
+['kbe-w','kbe-h','kbe-x','kbe-y'].forEach(id=>{
+  document.getElementById(id).onchange = kbeApply;
+});
+document.querySelectorAll('.kbe-preset').forEach(el=>{
+  el.onclick = ()=>{
+    if(kbeSel < 0) return;
+    document.getElementById('kbe-w').value = el.dataset.w;
+    kbeApply();
+  };
+});
+document.getElementById('kbe-pack').onclick = ()=>{
+  if(kbeSel < 0) return;
+  kbeKeys = packRow(kbeKeys, kbeSel);
+  renderKbEditor();
+};
+document.getElementById('kbe-save').onclick = ()=>{
+  if(!kbeTarget) return;
+  const lib = kbLibLoad();
+  let prof;
+  if(kbeBuiltin){
+    let id = kbeTarget.id+'_edit', n = 2;
+    while(lib.some(x=>x.id===id) || BUILTIN_PROFILES.some(x=>x.id===id)) id = kbeTarget.id+'_edit'+(n++);
+    prof = {id, name:kbeTarget.name+' (編集)', keyCount:kbeKeys.length,
+            keys:kbeKeys, rows:deriveRows(kbeKeys), features:Object.assign({}, kbeTarget.features)};
+    lib.push(prof);
+  } else {
+    prof = lib.find(x=>x.id===kbeTarget.id);
+    if(!prof){ alert('プロファイルが見つかりませんでした'); return; }
+    prof.keys = kbeKeys;
+    prof.rows = deriveRows(kbeKeys);
+    prof.keyCount = kbeKeys.length;
+  }
+  kbLibSave(lib);
+  if(state.keyboard && state.keyboard.id===prof.id){ setKeyboard(prof); state.keyboard = prof; }
+  closeModal('kbedit-bg');
+  renderKbModal();
+  renderAll();
+  document.getElementById('warnings').innerHTML = '<div class="warnbox">'
+    + esc(`✅ 「${prof.name}」のキーの形を保存しました。`)+'</div>';
+};
 function switchKeyboard(p){
   const cur = state.layers[0].bindings.length;
   if(p.keyCount!==cur){
@@ -6350,7 +6669,7 @@ When the operating system is set to Japanese (JIS), a keymap designed for a US l
 Keys whose symbol depends on Shift (<kbd>'</kbd> and <kbd>"</kbd>) are handled by generating mod-morph behaviors automatically. The button is only enabled when something actually differs (the count is shown), and you can review and pick the individual keys before applying. The reverse direction works too. Assign <kbd>&to</kbd> to a key to switch between the groups.
       </div>
       <dl class="hdl">
-        <dt>Group conversion (layout / OS)</dt><dd>Each group can declare a <b>layout standard</b> (US, JIS, UK, German, Dvorak) and a <b>target OS</b> (Windows, macOS, Linux). One group can then be rebuilt to match another, converting both at once where both differ. US⇄JIS conversion is one case of this. <span class="dim">Useful when you juggle three or more environments on one keyboard.</span></dd>
+        <dt>Group conversion (layout / OS)</dt><dd>Each group can declare a <b>layout standard</b> (US, JIS, UK, German) and a <b>target OS</b> (Windows, macOS, Linux). One group can then be rebuilt to match another, converting both at once where both differ. US⇄JIS conversion is one case of this. <span class="dim">Useful when you juggle three or more environments on one keyboard.</span></dd>
         <dt>Win⇄Mac conversion</dt><dd>Windows and macOS need different keys for the same action — <kbd>Ctrl+C</kbd> versus <kbd>Cmd+C</kbd>, <kbd>Home</kbd> versus <kbd>Cmd+←</kbd>, Henkan/Muhenkan versus Kana/Eisu. <span class="dim">Useful when you move between a work Windows machine and a Mac at home.</span></dd>
         <dt>Shift input switch</dt><dd>Declares whether a layer is used for typing symbols with Shift. Only such layers generate mod-morphs during conversion and show the Shift face in the corner of each key. It does not restrict modifier chords for shortcuts. <span class="dim">Useful for keeping function, mouse and Bluetooth layers free of unnecessary mod-morphs.</span></dd>
         <dt>OS compatibility check</dt><dd>Some keycodes are silently ignored by particular operating systems. Media keys exist in two forms (<kbd>K_MUTE</kbd> and <kbd>C_MUTE</kbd>); the first does nothing on Windows or macOS. Conversely <kbd>C_STOP</kbd> only fails on Windows. Choose the systems you use and the tool lists every affected key and offers a one-click replacement. <span class="dim">Linux accepts the widest range, including both kinds of media key, but rejects legacy keys such as SYSREQ and LOCKING_CAPS, and INT7–INT9 / LANG6–LANG9. The data comes from ZMK's official keycode list.</span></dd>
