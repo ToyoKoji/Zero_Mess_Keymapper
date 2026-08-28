@@ -280,6 +280,55 @@ section('マクロ等の環境別対応');
   }
 }
 
+/* ---------- OSに合わせたキー表示 ---------- */
+section('OS別のキー表示');
+{
+  const st = S();
+  const rs = w.groupRanges(st.groups);
+  const set = ['&kp LALT', '&kp LGUI', '&kp LCTRL', '&kp LC(C)', '&kp LC(LS(T))',
+    '&kp DEL', '&kp LS(N2)', '&kp A', '&kp LC(T)'];
+  // 先頭の環境をWindows、末尾の環境をmacOSにして見比べる
+  // OSの違いだけを見たいので、配列は両方そろえる
+  const first = 0, last = rs.length - 1;
+  st.groups[first].locale = 'us'; st.groups[first].platform = 'win';
+  st.groups[last].locale = 'us';  st.groups[last].platform = 'mac';
+  [rs[first].start, rs[last].start].forEach(li => {
+    set.forEach((b, i) => { if (i < st.layers[li].bindings.length) st.layers[li].bindings[i] = b; });
+  });
+  const read = () => [...w.document.querySelectorAll('#board .key')]
+    .slice(0, set.length).map(k => k.textContent.trim());
+
+  w.eval('activeLayer=' + rs[first].start); w.renderAll();
+  const winFace = read();
+  w.eval('activeLayer=' + rs[last].start); w.renderAll();
+  const macFace = read();
+
+  t('Windows環境では Alt と出る', winFace[0] === 'Alt', winFace[0]);
+  t('macOS環境では ⌥ と出る', macFace[0] === '⌥', macFace[0]);
+  t('Windows環境では Win と出る', winFace[1] === 'Win', winFace[1]);
+  t('macOS環境では ⌘ と出る', macFace[1] === '⌘', macFace[1]);
+  t('Ctrl の表示も変わる', winFace[2] === 'Ctrl' && macFace[2] === '⌃', winFace[2] + ' / ' + macFace[2]);
+  t('修飾ラッパの表示も変わる', winFace[3] === '^C' && macFace[3] === '⌃C', winFace[3] + ' / ' + macFace[3]);
+  t('Del の表示も変わる', winFace[5] === 'Del' && macFace[5] === '⌦', winFace[5] + ' / ' + macFace[5]);
+  t('記号は配列で決まるので変わらない', winFace[6] === macFace[6], winFace[6] + ' / ' + macFace[6]);
+  t('文字キーは変わらない', winFace[7] === macFace[7]);
+  t('Ctrl+Shift+T と Ctrl+T が区別できる', winFace[4] !== winFace[8], winFace[4] + ' vs ' + winFace[8]);
+
+  // 表示を変えても書き出しは同じ
+  const out1 = w.generateKeymap(st);
+  st.groups[last].platform = 'win'; w.renderAll();
+  const out2 = w.generateKeymap(st);
+  t('表示が変わっても .keymap は同じ', out1 === out2);
+  t('OSを戻すと表示も戻る',
+    [...w.document.querySelectorAll('#board .key')][0].textContent.trim() === 'Alt',
+    [...w.document.querySelectorAll('#board .key')][0].textContent.trim());
+
+  // OS未設定なら Windows と同じ表記
+  st.groups[last].platform = null; w.renderAll();
+  t('OS未設定はWindowsと同じ表記',
+    [...w.document.querySelectorAll('#board .key')][0].textContent.trim() === 'Alt');
+}
+
 /* ---------- 書き出しと読み直し ---------- */
 section('書き出し');
 {

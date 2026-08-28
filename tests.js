@@ -1348,6 +1348,171 @@ section('キーコードの別名(回帰)');
   }
 }
 
+section('OS別のキー表示');
+{
+  /* 同じキーコードでも呼び名はOSで違う(Alt / Option)。表示だけを切り替え、
+     書き出す .keymap には影響させない。 */
+  const win = kc => C.kcLabel(kc, 'win');
+  const mac = kc => C.kcLabel(kc, 'mac');
+
+  const table = [
+    ['LALT',  'Alt',   '⌥'],
+    ['RALT',  'AltR',  '⌥R'],
+    ['LGUI',  'Win',   '⌘'],
+    ['RGUI',  'WinR',  '⌘R'],
+    ['LCTRL', 'Ctrl',  '⌃'],
+    ['RCTRL', 'CtrlR', '⌃R'],
+    ['DEL',   'Del',   '⌦']
+  ];
+  table.forEach(([kc, w, m])=>{
+    t(`${kc} は Windows で ${w}`, win(kc)===w, win(kc));
+    t(`${kc} は macOS で ${m}`, mac(kc)===m, mac(kc));
+  });
+  t('Shiftはどちらも同じ', win('LSHFT')==='⇧' && mac('LSHFT')==='⇧');
+  t('文字キーは変わらない', win('A')===mac('A') && win('N1')===mac('N1'));
+  t('Enter/BSは共通の記号', win('ENTER')===mac('ENTER') && win('BSPC')===mac('BSPC'));
+
+  // 修飾ラッパ
+  t('LC() の表示', win('LC(C)')==='^C' && mac('LC(C)')==='⌃C', win('LC(C)')+' / '+mac('LC(C)'));
+  t('LA() の表示', win('LA(TAB)')==='Alt+⇥' && mac('LA(TAB)')==='⌥⇥', win('LA(TAB)')+' / '+mac('LA(TAB)'));
+  t('LG() の表示', win('LG(SPACE)')==='Win+␣' && mac('LG(SPACE)')==='⌘␣');
+  t('入れ子の表示', win('LC(LS(T))')==='^⇧T' && mac('LC(LS(T))')==='⌃⇧T',
+    win('LC(LS(T))')+' / '+mac('LC(LS(T))'));
+  t('3重の入れ子', mac('LC(LA(DEL))')==='⌃⌥⌦', mac('LC(LA(DEL))'));
+
+  // OSの系統で決まる
+  t('Linux は Windows と同じ表記', C.kcLabel('LALT','linux')==='Alt');
+  t('Android も Windows と同じ表記', C.kcLabel('LALT','android')==='Alt');
+  t('iPadOS は macOS と同じ表記', C.kcLabel('LALT','ios')==='⌥');
+  t('未設定はキーコード名どおり', C.kcLabel('LALT')==='Alt' && C.kcLabel('LALT',null)==='Alt');
+  t('知らないOSでも落ちない', C.kcLabel('LALT','bsd')==='Alt');
+  t('labelFamily の判定', C.labelFamily('mac')==='cmd' && C.labelFamily('ios')==='cmd'
+    && C.labelFamily('win')==='ctrl' && C.labelFamily(null)==='ctrl');
+
+  // 表の体裁
+  t('両OSの表が同じ項目を持つ',
+    JSON.stringify(Object.keys(C.MOD_LABELS.ctrl))===JSON.stringify(Object.keys(C.MOD_LABELS.cmd)));
+  t('修飾ラッパの表も同じ項目',
+    JSON.stringify(Object.keys(C.MOD_PREFIX.ctrl))===JSON.stringify(Object.keys(C.MOD_PREFIX.cmd)));
+  t('表に空の呼び名がない',
+    Object.values(C.MOD_LABELS.cmd).every(v=>v.length>0) && Object.values(C.MOD_PREFIX.cmd).every(v=>v.length>0));
+
+  // 表示だけの違いで、キーコードは変わらない
+  {
+    const st = C.parseKeymap(C.DEFAULT_KEYMAP);
+    st.originalText = C.DEFAULT_KEYMAP;
+    st.combos = C.parseCombos(C.DEFAULT_KEYMAP);
+    st.behaviors = C.parseBehaviors(C.DEFAULT_KEYMAP);
+    st.macros = C.parseMacros(C.DEFAULT_KEYMAP);
+    st.condLayers = C.parseCondLayers(C.DEFAULT_KEYMAP);
+    st.trackball = C.parseTrackball(C.DEFAULT_KEYMAP);
+    const before = C.generateKeymap(st);
+    C.kcLabel('LALT','mac'); C.kcLabel('LGUI','win');
+    t('表示を切り替えても書き出しは変わらない', C.generateKeymap(st)===before);
+  }
+
+  // Ctrl+Shift+T と Ctrl+T が同じ表示にならないこと(回帰)
+  t('Shiftの有無が表示で区別できる', win('LC(T)')!==win('LC(LS(T))'),
+    win('LC(T)')+' vs '+win('LC(LS(T))'));
+  // kcLabel はキーコードの呼び名。「入力される文字」への畳み込みは
+  // 配列を知っている盤面側(kpFace)の仕事なので、ここでは修飾記号のまま。
+  t('kcLabel は修飾記号のまま出す', win('LS(A)')==='⇧A' && win('LS(N2)')==='⇧2', win('LS(N2)'));
+
+  // UI
+  t('レイヤーのOSを引く関数がある', ui.includes('function layerPlatform(i)'));
+  t('盤面がレイヤーのOSで描かれる', ui.includes('layerPlatform(activeLayer)'));
+  t('チートシートもレイヤーのOSで描かれる', ui.includes('const os = layerPlatform(li);'));
+  t('ヘルプに表示の対応表がある', html.includes('<dt>キーの表示はOSに合わせて変わります</dt>'));
+}
+
+section('修飾キーの変換(回帰)');
+{
+  /* Ctrl と Cmd だけを入れ替える。Alt/Option と Shift は同じキーなので触らない。
+     以前は入れ子(LC(LS(T)))と右側修飾(RC(...))が変換されず、
+     しかも書き順(LS(LC(T)))によっては変換される、という不安定な状態だった。 */
+  const w2m = b => C.convBindingPlatform(b, 'win2mac').raw;
+  const m2w = b => C.convBindingPlatform(b, 'mac2win').raw;
+
+  // 単独の修飾キー
+  t('Ctrl → Cmd', w2m('&kp LCTRL') === '&kp LGUI');
+  t('Cmd → Ctrl', m2w('&kp LGUI') === '&kp LCTRL');
+  t('右Ctrl → 右Cmd', w2m('&kp RCTRL') === '&kp RGUI');
+  t('Alt は変換しない', w2m('&kp LALT') === '&kp LALT' && m2w('&kp LALT') === '&kp LALT');
+  t('右Alt も変換しない', w2m('&kp RALT') === '&kp RALT');
+  t('Shift は変換しない', w2m('&kp LSHFT') === '&kp LSHFT' && m2w('&kp RSHFT') === '&kp RSHFT');
+
+  // 修飾ラッパ(1段)
+  t('LC() → LG()', w2m('&kp LC(C)') === '&kp LG(C)');
+  t('LG() → LC()', m2w('&kp LG(C)') === '&kp LC(C)');
+  t('LA() は変換しない', w2m('&kp LA(C)') === '&kp LA(C)');
+  t('LS() は変換しない', w2m('&kp LS(C)') === '&kp LS(C)');
+
+  // 入れ子(ここが直った部分)
+  const nested = [
+    ['&kp LC(LS(T))',      '&kp LG(LS(T))',      'Ctrl+Shift+T タブを復元'],
+    ['&kp LC(LS(N))',      '&kp LG(LS(N))',      'Ctrl+Shift+N'],
+    ['&kp LC(LS(ESC))',    '&kp LG(LS(ESC))',    'Ctrl+Shift+Esc'],
+    ['&kp LC(LA(DEL))',    '&kp LG(LA(DEL))',    'Ctrl+Alt+Del'],
+    ['&kp LC(LA(LS(A)))',  '&kp LG(LA(LS(A)))',  '3重の修飾'],
+    ['&kp LS(LC(T))',      '&kp LS(LG(T))',      '書き順が逆でも同じ']
+  ];
+  nested.forEach(([a, b, d]) => {
+    t('入れ子でも変換される: ' + d, w2m(a) === b, w2m(a));
+    t('入れ子でも往復する: ' + d, m2w(w2m(a)) === a, m2w(w2m(a)));
+  });
+
+  // 右側修飾(ここも直った部分)
+  t('RC() → RG()', w2m('&kp RC(C)') === '&kp RG(C)', w2m('&kp RC(C)'));
+  t('RG() → RC()', m2w('&kp RG(C)') === '&kp RC(C)');
+  t('右側の入れ子も変換される', w2m('&kp RC(LS(T))') === '&kp RG(LS(T))', w2m('&kp RC(LS(T))'));
+
+  // 入れ子の中身は壊さない
+  t('入れ子の中の Alt は残る', w2m('&kp LC(LA(DEL))').includes('LA(DEL)'));
+  t('入れ子の中の Shift は残る', w2m('&kp LC(LS(T))').includes('LS(T)'));
+  t('キー名は変わらない', /\(T\)\)$/.test(w2m('&kp LC(LS(T))')));
+
+  // ホールドタップの中でも効く
+  t('&mt の修飾も変換される', w2m('&mt LCTRL A') === '&mt LGUI A');
+  t('&mt の Alt は変換しない', w2m('&mt LALT A') === '&mt LALT A');
+
+  // Alt+Tab / Alt+F4 は意味の対応として個別に変換する
+  t('Alt+Tab → Cmd+Tab', w2m('&kp LA(TAB)') === '&kp LG(TAB)');
+  t('Alt+F4 → Cmd+Q', w2m('&kp LA(F4)') === '&kp LG(Q)');
+  t('ふつうのAlt併用は変えない', w2m('&kp LA(ENTER)') === '&kp LA(ENTER)');
+
+  // 修飾キーの使用判定
+  t('usesMod が Ctrl を見つける', C.usesMod('&kp LCTRL','ctrl') && C.usesMod('&kp LC(C)','ctrl'));
+  t('usesMod が GUI を見つける', C.usesMod('&kp LGUI','gui') && C.usesMod('&kp LG(C)','gui'));
+  t('usesMod は別名も見る', C.usesMod('&kp LEFT_WIN','gui') && C.usesMod('&kp LEFT_CONTROL','ctrl'));
+  t('usesMod は入れ子も見る', C.usesMod('&kp LC(LS(T))','ctrl'));
+  t('usesMod は取り違えない', !C.usesMod('&kp LALT','ctrl') && !C.usesMod('&kp LALT','gui')
+    && !C.usesMod('&kp LCTRL','gui') && !C.usesMod('&kp LGUI','ctrl'));
+
+  /* Winキー と macOSのControlキーには相手がいないため、変換すると重なる。
+     変換自体は行いつつ注意を出す。 */
+  {
+    const toMac = b => C.convBindingFull(b, null, null, 'win', 'mac', false, null, null);
+    const toWin = b => C.convBindingFull(b, null, null, 'mac', 'win', false, null, null);
+    t('Winキーの重なりを知らせる', toMac('&kp LGUI').warns.length === 1, JSON.stringify(toMac('&kp LGUI').warns));
+    t('Win+D の重なりも知らせる', toMac('&kp LG(D)').warns.length === 1);
+    t('別名のWinキーも知らせる', toMac('&kp LEFT_WIN').warns.length === 1);
+    t('Ctrlからの変換では注意を出さない', toMac('&kp LCTRL').warns.length === 0);
+    t('関係ないキーでは注意を出さない', toMac('&kp A').warns.length === 0 && toMac('&kp LALT').warns.length === 0);
+    t('macOSのControlの重なりを知らせる', toWin('&kp LCTRL').warns.length === 1, JSON.stringify(toWin('&kp LCTRL').warns));
+    t('Ctrl+Space の重なりも知らせる', toWin('&kp LC(SPACE)').warns.length === 1);
+    t('Cmdからの変換では注意を出さない', toWin('&kp LGUI').warns.length === 0);
+    t('注意が出ても変換は行う', toWin('&kp LGUI').raw === '&kp LCTRL');
+    t('同じ系統では注意を出さない',
+      C.convBindingFull('&kp LGUI', null, null, 'win', 'linux', false, null, null).warns.length === 0);
+  }
+
+  // ヘルプに対応表がある
+  t('ヘルプに修飾キーの対応表がある', html.includes('<dt>OSをまたぐときの修飾キー</dt>'));
+  t('対応表にAltとOptionの説明がある', html.includes('AltとOptionは同じキー'));
+  t('対応表のスタイルがある', html.includes('.modtab{'));
+  t('タブのスタイルと衝突していない', !html.includes('<table class="htab">'));
+}
+
 section('OSの系統(iOS / Linux / Android)');
 {
   // ショートカットの体系は Ctrl系(Windows/Linux/Android) と Cmd系(macOS/iOS) の2つ

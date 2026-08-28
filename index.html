@@ -204,6 +204,9 @@ kbd{background:var(--panel2);border:1px solid var(--border);border-radius:4px;pa
 .exkey.morph .corner{color:var(--morph);font-weight:700}
 .exkey.trans .main{color:var(--dim);font-weight:400}
 .exd{font-size:12.5px;line-height:1.6;color:var(--text)}
+.modtab{border-collapse:collapse;margin:8px 0;font-size:12px}
+.modtab th,.modtab td{border:1px solid var(--bd);padding:4px 9px;text-align:left}
+.modtab th{background:var(--panel2);font-weight:600;color:var(--fg2)}
 .htabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;border-bottom:1px solid var(--border);padding-bottom:10px}
 .htab{padding:7px 14px;border-radius:8px;background:var(--panel2);border:1px solid var(--border);cursor:pointer;font-size:13px;font-weight:600;color:var(--dim)}
 .htab.active{background:var(--selbg);border-color:var(--accent);color:var(--accent)}
@@ -1051,6 +1054,24 @@ Shiftの有無で記号が変わるキー(<kbd>'</kbd> と <kbd>"</kbd> など)�
         <dt>グループ間変換（配列規格 / OS）</dt><dd>グループごとに<b>配列規格</b>（US・JIS・UK・ドイツ語・Dvorak）と<b>対象OS</b>（Windows・macOS・Linux）を指定でき、あるグループの配置をもう一方に合わせて作り直せます。配列とOSの両方が違う場合は同時に変換します。US⇄JIS変換もこの仕組みの一部です。<span class="dim">役立つ場面: 3種類以上の環境を1つのキーボードで使い分けるとき、それぞれのグループを1回の操作で揃えられます。</span></dd>
         <dt>Win⇄Mac変換</dt><dd>WindowsとmacOSでは、同じ操作でも押すキーが異なります（コピーは <kbd>Ctrl+C</kbd> と <kbd>Cmd+C</kbd>、行頭移動は <kbd>Home</kbd> と <kbd>Cmd+←</kbd> など）。変換元のグループを元に、もう一方のOS向けの配置をまとめて作れます。日本語入力の切替（変換/無変換 ⇄ かな/英数）にも対応します。<span class="dim">役立つ場面: 会社ではWindows、自宅ではMacというように機種をまたぐとき、指の動きを変えずに済みます。US⇄JIS変換と同じく、実行前に差分を一覧で確認できます。</span></dd>
         <dt id="help-shift">Shift入力トグル</dt><dd>そのレイヤーで、Shiftを押しながらの記号打ちを使うかを指定します。「有効」のレイヤーだけJIS変換でmod-morphを生成し、キー右上にShift面を表示します。ショートカットの修飾同時押しには影響しません。<span class="dim">役立つ場面: ファンクション・マウス・Bluetooth用など記号打ちをしないレイヤーを「無効」にしておくと、不要なmod-morphが作られず、キーマップも表示もシンプルに保てます。</span></dd>
+        <dt>キーの表示はOSに合わせて変わります</dt><dd>同じキーコードでも呼び名はOSで違います。環境のOSを <b>macOS</b> か <b>iPadOS</b> にすると、盤面・チートシート・キー割り当て画面の表示が Mac の呼び方に変わります。<b>キーコード自体は変わりません</b>（表示だけの違いです）。
+        <table class="modtab"><tr><th>キーコード</th><th>Windows / Linux</th><th>macOS / iPadOS</th></tr>
+        <tr><td><code>LALT</code></td><td>Alt</td><td>⌥</td></tr>
+        <tr><td><code>LGUI</code></td><td>Win</td><td>⌘</td></tr>
+        <tr><td><code>LCTRL</code></td><td>Ctrl</td><td>⌃</td></tr>
+        <tr><td><code>LC(C)</code></td><td>^C</td><td>⌃C</td></tr>
+        <tr><td><code>LA(TAB)</code></td><td>Alt+⇥</td><td>⌥⇥</td></tr>
+        <tr><td><code>DEL</code></td><td>Del</td><td>⌦</td></tr></table>
+        OSが「設定なし」の環境では、Windows/Linux と同じ表記（キーコード名に近い形）で表示します。</dd>
+        <dt>OSをまたぐときの修飾キー</dt><dd>ショートカットの体系は<b>Ctrl系（Windows / Linux / Android）</b>と<b>Cmd系（macOS / iPadOS）</b>の2つです。変換されるのは<b>主修飾キーだけ</b>で、対応は次のとおりです。
+        <table class="modtab"><tr><th>Windows / Linux</th><th>macOS / iPadOS</th><th>扱い</th></tr>
+        <tr><td>Ctrl（<kbd>LCTRL</kbd> / <kbd>LC()</kbd>）</td><td>Cmd（<kbd>LGUI</kbd> / <kbd>LG()</kbd>）</td><td>相互に変換</td></tr>
+        <tr><td>Alt（<kbd>LALT</kbd> / <kbd>LA()</kbd>）</td><td>Option（同じ <kbd>LALT</kbd>）</td><td><b>変換しない</b>（同じキー）</td></tr>
+        <tr><td>Shift</td><td>Shift</td><td>変換しない</td></tr>
+        <tr><td>Win（<kbd>LGUI</kbd>）</td><td>—</td><td>対応するキーがない（下記）</td></tr>
+        <tr><td>—</td><td>Control（<kbd>LCTRL</kbd>）</td><td>対応するキーがない（下記）</td></tr></table>
+        <b>AltとOptionは同じキー</b>です。ZMKではどちらも <kbd>LALT</kbd> で、押す位置も同じなので変換は不要です。ただし <kbd>Alt+Tab</kbd>（アプリ切替）と <kbd>Alt+F4</kbd>（終了）だけは、macOSでは <kbd>⌘Tab</kbd> / <kbd>⌘Q</kbd> にあたるため個別に変換します。<br><br>
+        <b>WinキーとmacOSのControlキーには相手がいません。</b> Ctrl と Cmd を入れ替える都合上、元からWinキーを使っていた位置は変換後のCmdと重なります。該当する位置があると変換時に注意を出すので、その位置だけ手で見直してください。</dd>
         <dt>マクロ・tap-dance と環境</dt><dd>コンボと同じことが、マクロ・tap-dance・自作のmod-morphにも起こります。定義は1つなのに複数の環境のレイヤーから呼ばれるため、記号を出す定義は配列の違う環境で別の記号になります。各画面を開くと検出して知らせるので、<b>「環境ごとに分ける」</b>を押してください。定義が複製され、<b>その環境のレイヤーの参照先も自動で差し替わります</b>。<span class="dim">変換で自動生成された mod-morph は、はじめから環境専用なので対象外です。</span></dd>
         <dt>コンボと環境</dt><dd>ZMKのコンボは<b>全レイヤーで動きます</b>。そのため <kbd>"</kbd> のような記号を出すコンボは、配列の違う環境では別の記号が出てしまいます。「Combo」画面を開くと該当するコンボを検出して知らせるので、<b>「環境ごとに分ける」</b>を押してください。コンボが環境の数だけ複製され、それぞれに <code>layers</code> 指定と変換後の動作が入ります。<span class="dim">Bluetoothやマウスなど、環境で変わらない動作のコンボは検出されません。</span></dd>
         <dt>環境の設定を変える</dt><dd>レイヤー一覧の各環境の右にある<b>設定チップ</b>（例: <span class="dim">JIS × Windows</span>）をクリックすると、キーボード配列とOSをその場で変更できます。設定を変えても<b>配置はそのまま</b>です。実際に変換するときは「⇆ 環境間の同期」を使ってください。</dd>
@@ -1078,7 +1099,7 @@ Shiftの有無で記号が変わるキー(<kbd>'</kbd> と <kbd>"</kbd> など)�
  * 文字テーブル(LOCALE_CHARS) / .keymapパース / 生成 / 各機能ノードの
  * パース&パッチ / グループ・変換ユーティリティ / 表示ラベル
  * ============================================================ */
-const APP_VERSION = '3.7.0';
+const APP_VERSION = '3.9.0';
 
 let NUM_KEYS = 43;
 // roBa physical layout: [w,h,x,y,rot(centi-deg*100),rx,ry]
@@ -1232,10 +1253,18 @@ const PLATFORM_PAIRS = [
   ['&kp RCTRL',           '&kp RGUI',            '主修飾キー(右)'],
   ['&mt LCTRL',           '&mt LGUI',            '主修飾キー(ホールド)']
 ];
-/** 一般則: Ctrl+英数字 ⇄ Cmd+英数字 */
+/** 一般則: Ctrl+キー ⇄ Cmd+キー
+ * 修飾ラッパの接頭辞だけを入れ替える。中身は見ないので、
+ * `LC(LS(T))` のような入れ子や `RC(...)` のような右側修飾にも効く。 */
 function swapMainMod(raw, toMac){
-  const from = toMac? 'LC' : 'LG', to = toMac? 'LG' : 'LC';
-  return raw.replace(new RegExp('\\b'+from+'\\(([A-Z0-9_]+)\\)','g'), (m,inner)=>to+'('+inner+')');
+  const from = toMac? 'C' : 'G', to = toMac? 'G' : 'C';
+  return raw.replace(new RegExp('\\b([LR])'+from+'\\(', 'g'), (m, side)=> side+to+'(');
+}
+/** バインディングが Ctrl / GUI(Win・Cmd) を使っているか。別名も見る */
+function usesMod(raw, kind){
+  const c = canonBinding(raw);
+  return kind==='ctrl' ? /\b[LR]CTRL\b|\b[LR]C\(/.test(c)
+                       : /\b[LR]GUI\b|\b[LR]G\(/.test(c);
 }
 /* ショートカットの体系は実質2系統。ここを基準に変換方向を決める。
  * Ctrl系: Windows / Linux / Android   Cmd系: macOS / iPadOS(iOS) */
@@ -2543,13 +2572,30 @@ LSHFT:'⇧',RSHFT:'⇧R',LCTRL:'Ctrl',RCTRL:'CtrlR',LALT:'Alt',RALT:'AltR',LGUI:
 INT_HENKAN:'変換',INT_MUHENKAN:'無変換',INT_KANA:'かな',INT1:'ろ\\',INT3:'¥',NUHS:']}',
 K_CANCEL:'Cancel',K_MUTE:'Mute',K_PLAY_PAUSE:'⏯',K_PP:'⏯',K_NEXT:'⏭',K_PREV:'⏮',K_PREVIOUS:'⏮',K_VOL_UP:'Vol+',K_VOL_DN:'Vol-',K_VOLUME_UP:'Vol+',K_VOLUME_DOWN:'Vol-',SLCK:'ScrLk',PAUSE_BREAK:'Pause',K_APP:'Menu',K_CMENU:'Menu',C_STOP:'停止',C_POWER:'電源',C_SLEEP:'Sleep',C_AC_BACK:'戻る',C_AC_FORWARD:'進む',C_AC_REFRESH:'更新',C_AC_SEARCH:'検索',C_AC_HOME:'⌂',C_AL_CALCULATOR:'電卓',C_AL_MAIL:'メール',K_PREV:'⏮',K_NEXT:'⏭',K_PLAY_PAUSE:'⏯',K_MUTE:'Mute',SCROLLLOCK:'ScrLk',KP_NUMLOCK:'NumLk',LANG1:'かな',LANG2:'英数',C_VOLUME_UP:'Vol+',C_VOLUME_DOWN:'Vol-',C_BRIGHTNESS_INC:'☀+',C_BRIGHTNESS_DEC:'☀-',K_SCROLL_UP:'Scr↑',K_SCROLL_DOWN:'Scr↓', C_VOL_UP:'Vol+',C_VOL_DN:'Vol-',C_MUTE:'Mute',C_PP:'⏯',C_NEXT:'⏭',C_PREV:'⏮',C_BRI_UP:'☀+',C_BRI_DN:'☀-'
 };
-function kcLabel(kc){
+/* 修飾キーの呼び名はOSで違う。キーコードは同じでも、
+ * Windows/Linux では Alt・Win、macOS/iPadOS では ⌥Option・⌘Command と呼ぶ。
+ * 表示だけの違いなので、書き出す .keymap には影響しない。 */
+const MOD_LABELS = {
+  ctrl: {LCTRL:'Ctrl', RCTRL:'CtrlR', LALT:'Alt', RALT:'AltR',
+         LGUI:'Win',  RGUI:'WinR',  LSHFT:'⇧',  RSHFT:'⇧R', DEL:'Del'},
+  cmd:  {LCTRL:'⌃',   RCTRL:'⌃R',   LALT:'⌥',   RALT:'⌥R',
+         LGUI:'⌘',    RGUI:'⌘R',    LSHFT:'⇧',  RSHFT:'⇧R', DEL:'⌦'}
+};
+const MOD_PREFIX = {
+  ctrl: {LS:'⇧',RS:'⇧',LC:'^',RC:'^',LA:'Alt+',RA:'Alt+',LG:'Win+',RG:'Win+'},
+  cmd:  {LS:'⇧',RS:'⇧',LC:'⌃',RC:'⌃',LA:'⌥',  RA:'⌥',  LG:'⌘',   RG:'⌘'}
+};
+/** OS名から表示の系統を決める。未設定や不明ならCtrl系(キーコード名どおり) */
+function labelFamily(os){ return OS_FAMILY[os]==='cmd'? 'cmd' : 'ctrl'; }
+function kcLabel(kc, os){
+  const fam = labelFamily(os);
   const mm = kc.match(/^(LS|RS|LC|RC|LA|RA|LG|RG)\((.+)\)$/);
   if(mm){
-    const pre = {LS:'⇧',RS:'⇧',LC:'^',RC:'^',LA:'Alt+',RA:'Alt+',LG:'Win+',RG:'Win+'}[mm[1]];
-    return pre + kcLabel(mm[2]);
+    const pre = MOD_PREFIX[fam][mm[1]];
+    return pre + kcLabel(mm[2], os);
   }
   const c = canon(kc);
+  if(MOD_LABELS[fam][c]!==undefined) return MOD_LABELS[fam][c];
   if(LABELS[c]!==undefined) return LABELS[c];
   if(/^F\d+$/.test(c)) return c;
   if(/^KP_NUMBER_(\d)$/.test(c)) return 'KP'+c.match(/\d$/)[0];
@@ -2558,14 +2604,14 @@ function kcLabel(kc){
   return c.length>8 ? c.slice(0,8) : c;
 }
 // binding → {top, main, cls}
-function bindingLabel(raw){
+function bindingLabel(raw, os){
   const t = raw.trim().split(/\s+/);
   const b = t[0];
   if(b==='&trans') return {main:'▽', cls:'trans'};
   if(b==='&none') return {main:'✕', cls:'trans'};
-  if(b==='&kp') return {main:kcLabel(t.slice(1).join(''))};
-  if(b==='&mt') return {top:'H:'+kcLabel(t[1]), main:kcLabel(t[2]||'')};
-  if(b==='&lt') return {top:'L'+t[1], main:kcLabel(t[2]||'')};
+  if(b==='&kp') return {main:kcLabel(t.slice(1).join(''), os)};
+  if(b==='&mt') return {top:'H:'+kcLabel(t[1], os), main:kcLabel(t[2]||'', os)};
+  if(b==='&lt') return {top:'L'+t[1], main:kcLabel(t[2]||'', os)};
   if(b==='&mo') return {main:'MO '+t[1]};
   if(b==='&to') return {main:'TO '+t[1]};
   if(b==='&tog') return {main:'TG '+t[1]};
@@ -2577,7 +2623,7 @@ function bindingLabel(raw){
   if(b==='&out') return {top:'OUT', main:(t[1]||'').replace('OUT_','')};
   if(b==='&caps_word') return {main:'CapsW'};
   if(b==='&key_repeat') return {main:'Rep⟲'};
-  if(b==='&sk') return {top:'SK', main:kcLabel(t[1]||'')};
+  if(b==='&sk') return {top:'SK', main:kcLabel(t[1]||'', os)};
   if(b==='&mmv') return {main:({MOVE_UP:'P↑',MOVE_DOWN:'P↓',MOVE_LEFT:'P←',MOVE_RIGHT:'P→'})[t[1]]||t[1]};
   const name = b.slice(1);
   if(MORPH_BY_NAME[name]) return {main:MORPH_BY_NAME[name].lbl, cls:'morph'};
@@ -2585,8 +2631,8 @@ function bindingLabel(raw){
   if(b==='&rgb_ug') return {top:'RGB', main:(t[1]||'').replace('RGB_','')};
   if(name==='comma_morph') return {main:', !', cls:'morph'};
   if(name==='period_morph') return {main:'. ?', cls:'morph'};
-  if(name==='lt_to_layer_0') return {top:'L'+t[1]+'→0', main:kcLabel(t[2]||'')};
-  if(t.length>1) return {top:name.slice(0,9), main:t.slice(1).map(x=>kcLabel(x)).join(' '), small:true};
+  if(name==='lt_to_layer_0') return {top:'L'+t[1]+'→0', main:kcLabel(t[2]||'', os)};
+  if(t.length>1) return {top:name.slice(0,9), main:t.slice(1).map(x=>kcLabel(x, os)).join(' '), small:true};
   return {main:name.slice(0,9), small:true};
 }
 
@@ -2756,6 +2802,14 @@ function convBindingFull(raw, srcLoc, dstLoc, srcOs, dstOs, shiftMode, morphSink
   }
   const dir = platformDir(srcOs, dstOs);
   if(dir){
+    /* Ctrl と Cmd を入れ替えるため、元から相手側の修飾キーを使っていると重なる。
+       変換はそのまま行い、見直しが要ることだけ伝える。 */
+    if(dir==='win2mac' && usesMod(cur,'gui'))
+      warns.push('Windowsの Win キーは '+osName(dstOs)+' では Cmd と同じキーです。'
+        + 'Ctrl から変換した Cmd と重なるので、この位置は見直してください');
+    if(dir==='mac2win' && usesMod(cur,'ctrl'))
+      warns.push('macOSの Control キーは '+osName(dstOs)+' でも Control のままです。'
+        + 'Cmd から変換した Ctrl と重なるので、この位置は見直してください');
     const r = convBindingPlatform(cur, dir);
     if(r.raw!==cur){
       cur = r.raw;
@@ -3186,7 +3240,7 @@ function runValidation(state, osTargets){
   return [...new Set(issues)];
 }
 
-if (typeof module !== 'undefined') module.exports = {parseKeymap, generateKeymap, convBinding, convBindingUs, remapRefsOnly, normBinding, convertLayerToJis, convertAllToJis, groupRanges, gnameFor, buildJisMaps, nodeNameFor, parseHoldtapOne, patchHoldtapOne, parseStickyOne, patchStickyOne, parseMacros, genMacrosInner, parseMacroSteps, genMacroBindings, parseCondLayers, genCondLayersInner, charFor, TERMS, term, remapWithinEnv, buildEnvOffsetMap, WITHIN_ENV_REFS, layerRefTargets, findShadowedRefs, orderToFixShadowing, findBaseTransIssues, LOCALE_CHARS, LOCALE_LIST, localeIndex, getLocaleIndex, charOfKeycode, keycodeForChar, convBindingLocale, SYM_TO_LS, parseRepoRef, utf8ToBase64, base64ToUtf8, pickConfigFiles, I18N_EN, tr, setLang, getLang, OS_LIST, OS_COMPAT, OS_INDEX, keycodesIn, findOsIssues, fixOsIssues, PLATFORM_PAIRS, convBindingPlatform, canonBinding, OS_FAMILY, platformDir, osName, swapMainMod, findWinIncompatible, fixWinIncompatible, KEYBOARD, ROBA_PROFILE, setKeyboard, getKeyboard, parsePhysicalLayout, deriveRows, gridKeys, makeEmptyKeymap, APP_VERSION, canon, kcLabel, JIS_MAP, REV_MAP, US_TO_JIS_ORDER, tokenizeBindings, DEFAULT_KEYMAP, NUM_KEYS, bindingLabel, JIS_MORPHS, convBindingFull, localeOfGroup, platformOfGroup, comboEnvIndices, findComboEnvIssues, splitComboForEnvs, BEH_KIND_LABEL, isGeneratedMorph, collectBehaviorDefs, behaviorBindingsOf, behaviorWithBindings, envIndicesUsingBehavior, findBehaviorEnvIssues, splitBehaviorForEnvs, STATE_KEYS, pickState, runValidation, remapAllRefs, reorderLayers, orderForMove, orderForGroupMove, copyLayerAt, deleteLayerAt, moveLayerAt, addLayerAt, swapGroups, permuteGroups, parseCombos, parseBehaviors, parseTrackball, patchTrackball, genConf, CONF_DEFAULTS, PHYS};
+if (typeof module !== 'undefined') module.exports = {parseKeymap, generateKeymap, convBinding, convBindingUs, remapRefsOnly, normBinding, convertLayerToJis, convertAllToJis, groupRanges, gnameFor, buildJisMaps, nodeNameFor, parseHoldtapOne, patchHoldtapOne, parseStickyOne, patchStickyOne, parseMacros, genMacrosInner, parseMacroSteps, genMacroBindings, parseCondLayers, genCondLayersInner, charFor, TERMS, term, remapWithinEnv, buildEnvOffsetMap, WITHIN_ENV_REFS, layerRefTargets, findShadowedRefs, orderToFixShadowing, findBaseTransIssues, LOCALE_CHARS, LOCALE_LIST, localeIndex, getLocaleIndex, charOfKeycode, keycodeForChar, convBindingLocale, SYM_TO_LS, parseRepoRef, utf8ToBase64, base64ToUtf8, pickConfigFiles, I18N_EN, tr, setLang, getLang, OS_LIST, OS_COMPAT, OS_INDEX, keycodesIn, findOsIssues, fixOsIssues, PLATFORM_PAIRS, convBindingPlatform, canonBinding, usesMod, OS_FAMILY, platformDir, osName, swapMainMod, findWinIncompatible, fixWinIncompatible, KEYBOARD, ROBA_PROFILE, setKeyboard, getKeyboard, parsePhysicalLayout, deriveRows, gridKeys, makeEmptyKeymap, APP_VERSION, canon, kcLabel, MOD_LABELS, MOD_PREFIX, labelFamily, JIS_MAP, REV_MAP, US_TO_JIS_ORDER, tokenizeBindings, DEFAULT_KEYMAP, NUM_KEYS, bindingLabel, JIS_MORPHS, convBindingFull, localeOfGroup, platformOfGroup, comboEnvIndices, findComboEnvIssues, splitComboForEnvs, BEH_KIND_LABEL, isGeneratedMorph, collectBehaviorDefs, behaviorBindingsOf, behaviorWithBindings, envIndicesUsingBehavior, findBehaviorEnvIssues, splitBehaviorForEnvs, STATE_KEYS, pickState, runValidation, remapAllRefs, reorderLayers, orderForMove, orderForGroupMove, copyLayerAt, deleteLayerAt, moveLayerAt, addLayerAt, swapGroups, permuteGroups, parseCombos, parseBehaviors, parseTrackball, patchTrackball, genConf, CONF_DEFAULTS, PHYS};
 </script>
 
 <script>
@@ -3510,6 +3564,11 @@ function layerLocale(i){
   const loc = gi>=0? groupLocale(gi) : null;
   return loc || 'us';   // 設定なしのときはキーコード名どおり(US相当)で表示する
 }
+/** そのレイヤーが属する環境のOS。未設定なら null(キーコード名どおりの表示) */
+function layerPlatform(i){
+  const gi = groupIndexOfLayer(i);
+  return gi>=0? groupPlatform(gi) : null;
+}
 function groupOf(i){
   if(!state || !state.groups) return 'MAIN';
   for(const r of groupRanges(state.groups)){ if(i>=r.start && i<r.start+r.count) return r.name; }
@@ -3527,16 +3586,19 @@ try{ numMode = localStorage.getItem('roba_nummode') || 'group'; }catch(e){}
 
 /* ----- board ----- */
 // &kp のキー面 {main, corner?, small?}
-function kpFace(kc, layout, shiftOn){
+function kpFace(kc, layout, shiftOn, os, nested){
   const mm = kc.match(/^(LS|RS|LC|RC|LA|RA|LG|RG)\((.+)\)$/);
   if(mm){
     const mod = mm[1], inner = mm[2];
-    if((mod==='LS'||mod==='RS') && !inner.includes('(')){
+    /* Shift+キー は「入力される文字」に畳んで見せる(Shift+2 → @)。
+       ただし他の修飾の内側にあるときは畳まない。畳むと Ctrl+Shift+T と
+       Ctrl+T がどちらも「^T」になり、区別がつかなくなるため。 */
+    if((mod==='LS'||mod==='RS') && !inner.includes('(') && !nested){
       const ch = charFor(inner, layout, true);
       if(ch) return {main:ch};
     }
-    const pre = {LS:'⇧',RS:'⇧',LC:'^',RC:'^',LA:'Alt+',RA:'Alt+',LG:'Win+',RG:'Win+'}[mod];
-    const f = kpFace(inner, layout, shiftOn);
+    const pre = MOD_PREFIX[labelFamily(os)][mod];
+    const f = kpFace(inner, layout, shiftOn, os, true);
     const s = pre + f.main;
     return {main:s, small: s.length>4 || undefined};
   }
@@ -3550,45 +3612,45 @@ function kpFace(kc, layout, shiftOn){
     const sh = shiftOn? charFor(c, layout, true) : null;
     return {main:un, corner:(sh && sh!==un)? sh : undefined};
   }
-  return {main:kcLabel(kc)};
+  return {main:kcLabel(kc, os)};
 }
-function shortB(b, layout){
+function shortB(b, layout, os){
   const t = (b||'').trim().split(/\s+/);
-  if(t[0]==='&kp') return kpFace(t.slice(1).join(''), layout||'us').main;
+  if(t[0]==='&kp') return kpFace(t.slice(1).join(''), layout||'us', false, os).main;
   return (t[0]||'').slice(1);
 }
 // バインディング → キー面 {main, corner?, hold?, cls?, small?}
-function uiLabel(raw, layout, shiftOn){
+function uiLabel(raw, layout, shiftOn, os){
   layout = layout||'us';
   const t = raw.trim().split(/\s+/);
   const b = t[0], name = b.slice(1);
   if(state && state.behaviors){
     const mo = state.behaviors.morphs.find(x=>x.name===name);
-    if(mo) return {main:shortB(mo.b1, layout), corner:shortB(mo.b2, layout), cls:'morph'};
+    if(mo) return {main:shortB(mo.b1, layout, os), corner:shortB(mo.b2, layout, os), cls:'morph'};
     const td = state.behaviors.tds.find(x=>x.name===name);
-    if(td) return {main:td.bindings.map(x=>shortB(x, layout)).join('·'), top:'TD', small:true};
+    if(td) return {main:td.bindings.map(x=>shortB(x, layout, os)).join('·'), top:'TD', small:true};
     const mc = state.macros && state.macros.items.find(x=>x.name===name);
     if(mc) return {top:'MAC', main:mc.name.slice(0,8), small:true};
     const ht = state.behaviors.hts && state.behaviors.hts.find(x=>x.name===name);
     if(ht && t.length>=3){
-      const f = kpFace(t[2], layout, shiftOn);
+      const f = kpFace(t[2], layout, shiftOn, os);
       let hold;
-      if(ht.holdBeh==='&kp') hold = kcLabel(t[1]);
+      if(ht.holdBeh==='&kp') hold = kcLabel(t[1], os);
       else if(['&mo','&to','&tog','&sl'].includes(ht.holdBeh)) hold = 'L'+t[1];
       else hold = ht.holdBeh.slice(1);
       return {main:f.main, corner:f.corner, hold:hold, small:f.small};
     }
   }
-  if(MORPH_BY_NAME[name]) return {main:shortB(MORPH_BY_NAME[name].u,'jis'), corner:shortB(MORPH_BY_NAME[name].s,'jis'), cls:'morph'};
-  if(b==='&kp') return kpFace(t.slice(1).join(''), layout, shiftOn);
-  if(b==='&mt' && t.length>=3){ const f=kpFace(t[2], layout, shiftOn); return {main:f.main, corner:f.corner, hold:kcLabel(t[1]), small:f.small}; }
-  if(b==='&lt' && t.length>=3){ const f=kpFace(t[2], layout, shiftOn); return {main:f.main, corner:f.corner, hold:'L'+t[1], small:f.small}; }
-  if(name==='lt_to_layer_0' && t.length>=3){ const f=kpFace(t[2], layout, shiftOn); return {main:f.main, corner:f.corner, hold:'L'+t[1]+'→0', small:f.small}; }
+  if(MORPH_BY_NAME[name]) return {main:shortB(MORPH_BY_NAME[name].u,'jis',os), corner:shortB(MORPH_BY_NAME[name].s,'jis',os), cls:'morph'};
+  if(b==='&kp') return kpFace(t.slice(1).join(''), layout, shiftOn, os);
+  if(b==='&mt' && t.length>=3){ const f=kpFace(t[2], layout, shiftOn, os); return {main:f.main, corner:f.corner, hold:kcLabel(t[1], os), small:f.small}; }
+  if(b==='&lt' && t.length>=3){ const f=kpFace(t[2], layout, shiftOn, os); return {main:f.main, corner:f.corner, hold:'L'+t[1], small:f.small}; }
+  if(name==='lt_to_layer_0' && t.length>=3){ const f=kpFace(t[2], layout, shiftOn, os); return {main:f.main, corner:f.corner, hold:'L'+t[1]+'→0', small:f.small}; }
   if(b==='&mo') return {main:'L'+t[1], top:'MO'};
   if(b==='&to') return {main:'L'+t[1], top:'TO'};
   if(b==='&tog') return {main:'L'+t[1], top:'TOG'};
   if(b==='&sl') return {main:'L'+t[1], top:'SL'};
-  const lb = bindingLabel(raw);
+  const lb = bindingLabel(raw, os);
   return {main:lb.main, top:lb.top, cls:lb.cls, small:lb.small};
 }
 function renderBoard(){
@@ -3660,7 +3722,7 @@ function renderComboOverlay(board){
     pill.className = 'cpill-ed';
     pill.style.left = centers[k][0]+'px';
     pill.style.top = centers[k][1]+'px';
-    pill.textContent = String(uiLabel(c.binding, groupOf(activeLayer)==='JIS'?'jis':'us').main);
+    pill.textContent = String(uiLabel(c.binding, layerLocale(activeLayer), false, layerPlatform(activeLayer)).main);
     pill.title = 'コンボ: '+c.name+' — クリックで編集';
     pill.onclick = ()=>{
       document.getElementById('combo-bg').classList.add('open');
@@ -3673,7 +3735,7 @@ function renderComboOverlay(board){
 let dragIdx = null;
 function keyEl(raw, i){
   const el = document.createElement('div');
-  const lb = uiLabel(raw, layerLocale(activeLayer), !!state.layers[activeLayer].shiftLayer);
+  const lb = uiLabel(raw, layerLocale(activeLayer), !!state.layers[activeLayer].shiftLayer, layerPlatform(activeLayer));
   el.className='key'+(lb.cls?' '+lb.cls:'');
   el.title = raw + '  (pos '+i+')\nドラッグで入替 / Ctrl+ドロップで上書きコピー / レイヤータブへドロップで同位置にコピー';
   el.draggable = true;
@@ -4579,7 +4641,7 @@ function renderCombos(){
     d.appendChild(nm);
     const keys = c.keyPositions.map(p=>{
       const b = state.layers[0] && state.layers[0].bindings[p];
-      const lb = b? uiLabel(b) : null;
+      const lb = b? uiLabel(b, layerLocale(0), false, layerPlatform(0)) : null;
       return (lb? lb.main : '?')+'('+p+')';
     }).join(' + ');
     const sp = document.createElement('span');
@@ -4610,7 +4672,7 @@ function renderCbBoard(){
     k.style.left=(p[2]*S)+'px'; k.style.top=(p[3]*S)+'px';
     if(p[4]){ k.style.transformOrigin=((p[5]-p[2])*S)+'px '+((p[6]-p[3])*S)+'px'; k.style.transform='rotate('+(p[4]/100)+'deg)'; }
     const b = state.layers[0] && state.layers[0].bindings[i];
-    k.textContent = b? String(uiLabel(b).main||'').slice(0,4) : i;
+    k.textContent = b? String(uiLabel(b, layerLocale(activeLayer), false, layerPlatform(activeLayer)).main||'').slice(0,4) : i;
     k.title = 'pos '+i;
     k.onclick=()=>{ cbSel.has(i)?cbSel.delete(i):cbSel.add(i); renderCbBoard(); };
     bd.appendChild(k);
@@ -4739,9 +4801,9 @@ function modsPhrase(mods){
   return parts.join('または')+'押下時';
 }
 // バインディングの見た目文字列 (実際に入力される文字)
-function faceText(b, layout){
+function faceText(b, layout, os){
   if(!b) return '未設定';
-  const f = uiLabel(b, layout||'us', true);
+  const f = uiLabel(b, layout||'us', true, os);
   let s = String(f.main);
   if(f.hold) s += '('+f.hold+')';
   if(f.top) s = f.top+' '+s;
@@ -4987,7 +5049,7 @@ function renderHtBoard(){
     k.style.left=(p[2]*S)+'px'; k.style.top=(p[3]*S)+'px';
     if(p[4]){ k.style.transformOrigin=((p[5]-p[2])*S)+'px '+((p[6]-p[3])*S)+'px'; k.style.transform='rotate('+(p[4]/100)+'deg)'; }
     const b = state.layers[0] && state.layers[0].bindings[i];
-    k.textContent = b? String(uiLabel(b).main||'').slice(0,4) : i;
+    k.textContent = b? String(uiLabel(b, layerLocale(activeLayer), false, layerPlatform(activeLayer)).main||'').slice(0,4) : i;
     k.title = 'pos '+i;
     k.onclick=()=>{ htPosSel.has(i)?htPosSel.delete(i):htPosSel.add(i); renderHtBoard(); };
     bd.appendChild(k);
@@ -5354,9 +5416,9 @@ document.getElementById('tb-conf-copy').onclick = ()=>{
 };
 
 /* ----- cheat sheet ----- */
-function cheatKeyHtml(raw, i, S, layout, shiftOn){
+function cheatKeyHtml(raw, i, S, layout, shiftOn, os){
   const p = PHYS[i];
-  const lb = uiLabel(raw, layout, shiftOn);
+  const lb = uiLabel(raw, layout, shiftOn, os);
   const rot = p[4]? `transform:rotate(${p[4]/100}deg);transform-origin:${(p[5]-p[2])*S}px ${(p[6]-p[3])*S}px;`:'';
   const cls = lb.cls==='morph'?' cmorph':(lb.cls==='trans'?' ctrans':'');
   const mainCls = (lb.small||String(lb.main).length>5)?' csmall':'';
@@ -5373,7 +5435,8 @@ function cheatBoard(li, S){
   let maxX=0,maxY=0; PHYS.forEach(p=>{maxX=Math.max(maxX,p[2]+p[0]);maxY=Math.max(maxY,p[3]+p[1]);});
   const W=Math.ceil(maxX*S+8), H=Math.ceil(maxY*S+20);
   let keys='';
-  L.bindings.forEach((b,i)=>{ if(i<PHYS.length) keys += cheatKeyHtml(b,i,S,layout,shiftOn); });
+  const os = layerPlatform(li);
+  L.bindings.forEach((b,i)=>{ if(i<PHYS.length) keys += cheatKeyHtml(b,i,S,layout,shiftOn,os); });
   const combos = state.combos.filter(c=> (c.layers&&c.layers.length)? c.layers.includes(li) : defaultComboLayers().has(li));
   let lines='', pills='';
   combos.forEach(c=>{
@@ -5381,7 +5444,7 @@ function cheatBoard(li, S){
     if(!pts.length) return;
     const mx = pts.reduce((a,p)=>a+p[0],0)/pts.length, my = pts.reduce((a,p)=>a+p[1],0)/pts.length;
     pts.forEach(p=>{ lines += `<line x1="${p[0]}" y1="${p[1]}" x2="${mx}" y2="${my}"/>`; });
-    pills += `<div class="cpill" style="left:${mx}px;top:${my}px" title="${esc(c.name)}">${esc(String(uiLabel(c.binding, layout).main))}</div>`;
+    pills += `<div class="cpill" style="left:${mx}px;top:${my}px" title="${esc(c.name)}">${esc(String(uiLabel(c.binding, layout, false, os).main))}</div>`;
   });
   return `<div class="cboard-wrap"><div class="cboard-title"><b>${gname(li)}</b> ${esc(L.name)} <span style="color:#999;font-size:10px">fw:${li}</span>${L.shiftLayer?' <span class="stag">Shift入力</span>':''}</div>
 <div class="cboard" style="width:${W}px;height:${H}px">${keys}<svg width="${W}" height="${H}">${lines}</svg>${pills}</div></div>`;
@@ -5687,7 +5750,7 @@ function renderSwBoard(){
       const gi = Number(taken[i]);
       k.textContent = (state.groups[gi].name||'').slice(0,4);
     } else {
-      k.textContent = cur? String(uiLabel(cur).main||'').slice(0,4) : i;
+      k.textContent = cur? String(uiLabel(cur, layerLocale(activeLayer), false, layerPlatform(activeLayer)).main||'').slice(0,4) : i;
     }
     k.title = 'pos '+i + (cur? '（現在: '+cur+'）':'');
     k.onclick = ()=>{
