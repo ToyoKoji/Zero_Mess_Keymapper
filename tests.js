@@ -34,7 +34,7 @@ const C = require(corePath);
 const ui = scripts[1][1];
 
 /* 実際の設定ファイルらしさ(7レイヤー・コンボ・マクロ・トラックボール)を
-   確かめるための見本。既定のキーマップは HHKB の素直な2レイヤーなので、
+   確かめるための見本。既定のキーマップは Corne の素直な3レイヤーなので、
    複雑な構造の検査にはこちらを使う。 */
 const samplePath = path.join(__dirname, 'sample-roba.keymap');
 const SAMPLE = fs.existsSync(samplePath) ? fs.readFileSync(samplePath, 'utf8') : null;
@@ -46,8 +46,11 @@ section('keymapパース/生成');
 const p = C.parseKeymap(SAMPLE || C.DEFAULT_KEYMAP);
 t('見本は7レイヤー×43キー', p.layers.length===7 && p.layers.every(l=>l.bindings.length===43),
   p.layers.length+'×'+p.layers[0].bindings.length);
-t('既定は2レイヤー×60キー(HHKB)', (()=>{ const d=C.parseKeymap(C.DEFAULT_KEYMAP);
-  return d.layers.length===2 && d.layers.every(l=>l.bindings.length===C.NUM_KEYS); })(), String(C.NUM_KEYS));
+// 起動時のキーマップは、既定キーボードから組み立てたもの(手書きの塊は持たない)
+t('起動時のキーマップは既定キーボードに合う', (()=>{ const d=C.parseKeymap(C.DEFAULT_KEYMAP);
+  return !d.error && d.layers.length>=2 && d.layers.every(l=>l.bindings.length===C.NUM_KEYS); })(),
+  C.NUM_KEYS+'キー');
+t('起動時のキーマップは生成物', scripts[0][1].includes('const DEFAULT_KEYMAP = makeDefaultKeymap('));
 {
   const st = {originalText:C.DEFAULT_KEYMAP, layers:p.layers};
   const out = C.generateKeymap(st);
@@ -56,50 +59,85 @@ t('既定は2レイヤー×60キー(HHKB)', (()=>{ const d=C.parseKeymap(C.DEFAU
   t('sensor保持', out.includes('inc_dec_kp PG_UP'));
 }
 
-/* ---------- 2. グループとJIS変換 ---------- */
-section('グループ/JIS変換');
+/* ---------- 2. 利用環境の区切りとノード名 ---------- */
+section('利用環境の区切りとノード名');
 {
   const pp = C.parseKeymap(SAMPLE || C.DEFAULT_KEYMAP);
-  pp.layers.forEach((l,i)=>l.shiftLayer=(i===0));
   const groups = [{name:'US',count:5},{name:'GEN',count:2}];
-  const st = {originalText:C.DEFAULT_KEYMAP, layers:pp.layers, groups};
-  groups.push({name:'JIS',count:5});
-  C.convertAllToJis(st);
-  t('12レイヤー構成', st.layers.length===12);
-  t('JIS名に_JISなし', st.layers.slice(7).every(l=>!/_JIS$/.test(l.name)));
-  t('親指参照リマップ(JIS側へ)', st.layers[7].bindings[38]==='&lt 9 SPACE' && st.layers[7].bindings[41]==='&lt 8 ENTER');
-  t('GEN参照は据え置き', st.layers[7].bindings[37]==='&lt_to_layer_0 6 INT_HENKAN' && st.layers[7].bindings[7]==='&lt 5 I');
-  const l7m = [...new Set(st.layers[7].bindings.filter(b=>b.startsWith('&jis_')))].sort().join(',');
-  t('Shift有効レイヤーでmorph生成', l7m==='&jis_minus,&jis_semi,&jis_sqt', l7m);
-  t('Shift無効レイヤーはmorphなし', st.layers.slice(8).every(L=>L.bindings.every(b=>!b.startsWith('&jis_'))));
-  // 順→逆の完全復元
-  let rt = true;
-  const maps = C.buildJisMaps(groups);
-  for(const s of maps.order){
-    st.layers[s].bindings.forEach(b=>{
-      const f = C.convBinding(b, maps.fwd, !!st.layers[s].shiftLayer).raw;
-      const back = C.convBindingUs(f, maps.rev).raw;
-      if(C.normBinding(back)!==C.normBinding(b)) rt = false;
-    });
-  }
-  t('順変換→逆変換の完全復元', rt);
-  // ノード名と復元
+  const st = {originalText:C.DEFAULT_KEYMAP, layers:pp.layers.slice(0,7), groups};
+  t('区切りが範囲になる', JSON.stringify(C.groupRanges(groups).map(r=>[r.start,r.count]))==='[[0,5],[5,2]]');
+  t('意味的な番号が引ける', C.gnameFor(groups,0)==='US_01' && C.gnameFor(groups,6)==='GEN_02');
   const out = C.generateKeymap(st);
   t('ノード名にグループ接頭辞', C.parseKeymap(out).layers[0].name==='US_01_default_layer');
-  t('グループ名の一意関数', C.gnameFor(groups,0)==='US_01' && C.gnameFor(groups,6)==='GEN_02' && C.gnameFor(groups,11)==='JIS_05');
+  t('読み直しても名前が保たれる', C.parseKeymap(out).layers[6].name==='GEN_02_layer_6');
 }
 
-/* ---------- 3. 個別変換ケース ---------- */
+/* ---------- 3. 配列変換(US⇄JIS)の個別ケース ---------- */
 section('変換ケース');
-[
- ['&kp AT_SIGN','&kp LBKT'], ['&kp CARET','&kp EQUAL'], ['&kp PIPE','&kp LS(INT3)'],
- ['&kp SQT','&jis_sqt'], ['&kp EQUAL','&jis_eql'], ['&kp LS(N2)','&kp LBKT'],
- ['&kp Q','&kp Q'], ['&trans','&trans'], ['&kp LC(LA(KP_NUMBER_0))','&kp LC(LA(KP_NUMBER_0))'],
-].forEach(([i,e])=>t('JIS: '+i, C.convBinding(i, null, true).raw===e, C.convBinding(i, null, true).raw));
-[
- ['&jis_minus','&kp MINUS'], ['&kp LBKT','&kp AT'], ['&kp LS(N7)','&kp SQT'], ['&kp NUHS','&kp RBKT'],
-].forEach(([i,e])=>t('US: '+i, C.convBindingUs(i, null).raw===e, C.convBindingUs(i, null).raw));
-t('normBinding等価', C.normBinding('&kp NUMBER_7')===C.normBinding('&kp N7'));
+{
+  /* 変換は汎用エンジン1本。期待値をここに直接書いておく
+     (別実装との突き合わせではなく、こうなるべきという宣言にする) */
+  const conv = (b,f,to,sm)=>C.convBindingLocale(b,f,to,sm,()=>{}).raw;
+  [
+   ['&kp AT_SIGN','&kp LBKT'], ['&kp CARET','&kp EQUAL'], ['&kp PIPE','&kp LS(INT3)'],
+   ['&kp AMPERSAND','&kp LS(N6)'], ['&kp ASTERISK','&kp LS(SQT)'],
+   ['&kp LEFT_PARENTHESIS','&kp LS(N8)'], ['&kp UNDERSCORE','&kp LS(INT1)'],
+   ['&kp PLUS','&kp LS(SEMI)'], ['&kp LEFT_BRACE','&kp LS(RBKT)'],
+   ['&kp COLON','&kp SQT'], ['&kp DOUBLE_QUOTES','&kp LS(N2)'], ['&kp TILDE','&kp LS(EQUAL)'],
+   ['&kp LS(N2)','&kp LBKT'], ['&kp LBKT','&kp RBKT'], ['&kp RBKT','&kp NUHS'],
+   ['&kp Q','&kp Q'], ['&trans','&trans'], ['&kp LC(LA(KP_NUMBER_0))','&kp LC(LA(KP_NUMBER_0))'],
+  ].forEach(([i,e])=>t('US→JIS: '+i, conv(i,'us','jis',true)===e, conv(i,'us','jis',true)));
+
+  // Shift面が食い違うキーは mod-morph を作る。名前に「元→先・元のキー」が入る
+  [
+   ['&kp SQT','&loc_us_jis_sqt'], ['&kp EQUAL','&loc_us_jis_equal'],
+   ['&kp MINUS','&loc_us_jis_minus'], ['&kp SEMI','&loc_us_jis_semi'],
+  ].forEach(([i,e])=>t('US→JIS(morph): '+i, conv(i,'us','jis',true)===e, conv(i,'us','jis',true)));
+
+  t('Shift入力OFFならmorphを作らない', !conv('&kp SQT','us','jis',false).startsWith('&loc_'),
+    conv('&kp SQT','us','jis',false));
+
+  // 逆向き
+  [
+   ['&kp LS(N7)','&kp SQT'], ['&kp NUHS','&kp RBKT'], ['&kp RBKT','&kp LBKT'],
+   ['&kp LS(N2)','&kp LS(SQT)'], ['&kp LS(SEMI)','&kp LS(EQUAL)'], ['&kp LS(RBKT)','&kp LS(LBKT)'],
+   ['&kp LBKT','&loc_jis_us_lbkt'],
+  ].forEach(([i,e])=>t('JIS→US: '+i, conv(i,'jis','us',true)===e, conv(i,'jis','us',true)));
+
+  /* 生成した mod-morph を、さらに別の配列へ持っていけること。
+     名前から「元の配列と元のキー」をたどれるので、正確に変換し直せる。 */
+  t('morphを元に戻せる', conv('&loc_us_jis_sqt','jis','us',true)==='&kp SQT',
+    conv('&loc_us_jis_sqt','jis','us',true));
+  t('morphを別の配列へ渡せる', conv('&loc_us_jis_sqt','jis','de',true)==='&loc_us_de_sqt',
+    conv('&loc_us_jis_sqt','jis','de',true));
+  t('別の配列のmorphには触らない', conv('&loc_us_de_sqt','jis','us',true)==='&loc_us_de_sqt');
+
+  /* 往復。素のキー(A や N1、SQT など)は完全に元へ戻る。
+     ただし EXCL のような「US配列でShiftを押して出る記号」の別名は、
+     変換先では素のキーになるため、戻すと mod-morph になる(両面を保つため)。
+     戻らないのではなく、情報が増えている。 */
+  {
+    let ng = [];
+    C.parseKeymap(C.DEFAULT_KEYMAP).layers.forEach(L=>L.bindings.forEach(b=>{
+      const kc = b.startsWith('&kp ')? b.slice(4) : null;
+      if(kc && C.SYM_TO_LS[C.canon(kc)]) return;      // Shift面の別名は対象外
+      const f = conv(b,'us','jis',true), back = conv(f,'jis','us',true);
+      if(back !== b) ng.push(b+' → '+f+' → '+back);
+    }));
+    t('US→JIS→US で完全に戻る', ng.length===0, ng.slice(0,3).join(' | '));
+  }
+  {
+    // Shift面の別名も、出る文字は保たれる
+    let ng = [];
+    ['&kp EXCL','&kp AT','&kp CARET','&kp AMPS','&kp LPAR'].forEach(b=>{
+      const want = C.charFor(b.slice(4), 'us');
+      const f = conv(b,'us','jis',true);
+      const got = f.startsWith('&kp ')? C.charFor(f.slice(4), 'jis') : want;   // morphは両面を持つ
+      if(want && got && want!==got) ng.push(b+': '+want+' → '+got);
+    });
+    t('Shift面の記号は文字が保たれる', ng.length===0, ng.join(' | '));
+  }
+}
 
 /* ---------- 4. 各機能ノードのラウンドトリップ ---------- */
 section('Combo/Behavior/Macro/CondLayer');
@@ -129,8 +167,8 @@ section('Combo/Behavior/Macro/CondLayer');
   const m2 = C.parseMacros(out);
   t('macroラウンドトリップ', m2.items.length===1 && m2.raws.length===1 && C.genMacroBindings(m2.items[0].steps)===C.genMacroBindings(st.macros.items[0].steps));
   t('condLayerラウンドトリップ', JSON.stringify(C.parseCondLayers(out))===JSON.stringify(st.condLayers));
-  t('holdtapラウンドトリップ', C.parseHoldtapOne(out,'mt').flavor==='tap-preferred' && C.parseHoldtapOne(out,'lt').tapping==='220');
-  t('stickyラウンドトリップ', C.parseStickyOne(out,'sk').quickRelease===true && C.parseStickyOne(out,'sk').releaseAfter==='900');
+  t('holdtapラウンドトリップ', C.parseHoldtapOne(out,'mt').flavor==='tap-preferred' && C.parseHoldtapOne(out,'lt').tapping===220);
+  t('stickyラウンドトリップ', C.parseStickyOne(out,'sk').quickRelease===true && C.parseStickyOne(out,'sk').releaseAfter===900);
   t('trackball反映', C.parseTrackball(out).automouseLayer===6);
   t('コメント保全', out.includes('// arrows {'));
   t('生成後もkeymapパース可', C.parseKeymap(out).layers.length===7);
@@ -226,19 +264,20 @@ section('キーの大きさと位置');
     t('内蔵プロファイルに重なりがない: '+p.id, C.findKeyOverlaps(p.keys).length === 0,
       JSON.stringify(C.findKeyOverlaps(p.keys).slice(0,3)));
   });
-  // HHKB は 1U 以外のキーを持つ(この機能が必要になる実例)
+  // 内蔵はすべて1Uだが、取り込んだ盤面には1U以外が来る(この機能が必要になる実例)
   {
-    const hh = C.builtinProfile('hhkb');
-    const sizes = [...new Set(hh.keys.map(k=>k[0]))].sort((a,b)=>a-b);
-    t('HHKBに1U以外の幅がある', sizes.length > 1, sizes.map(v=>v/100+'U').join(','));
-    t('7Uのスペースがある', sizes.includes(700));
+    const keys = [[100,100,0,0,0,0,0],[100,100,100,0,0,0,0],[100,100,200,0,0,0,0]];
+    const r = C.resizeKeyAt(keys, 0, 225, 100, true);
+    t('幅を変えられる', r[0][0] === 225);
+    t('後ろがずれる', r[1][2] === 225 && r[2][2] === 325, r.map(k=>k[2]).join(','));
+    t('ずらした結果が重ならない', C.findKeyOverlaps(r).length === 0);
   }
 
   // 画面
   t('編集画面がある', html.includes('id="kbedit-bg"'));
   t('よく使う幅のボタンがある', (html.match(/class="modcheck kbe-preset"/g)||[]).length >= 8);
   t('一覧から編集を開ける', ui.includes('be.onclick = ()=>openKbEditor(p)'));
-  t('内蔵は複製してから編集する', ui.includes("prof = {id, name:kbeTarget.name+' (編集)'"));
+  t('内蔵は複製してから編集する', ui.includes("name:kbeTarget.name+tr(' (編集)')"));
   t('保存時に行を導き直す', ui.includes('rows:deriveRows(kbeKeys)'));
   t('ヘルプに記載がある', html.includes('<b>「形を編集」</b>'));
 }
@@ -272,8 +311,8 @@ section('レイアウトの取り込み');
 
   // 内蔵プロファイルと同じ定義から、同じ結果が得られること
   {
-    const hh = C.builtinProfile('hhkb');
-    const src = '/ { x: x { compatible = "zmk,physical-layout"; display-name = "HHKB";\n keys = '
+    const hh = C.builtinProfile('corne6');
+    const src = '/ { x: x { compatible = "zmk,physical-layout"; display-name = "Corne";\n keys = '
       + hh.keys.map(k=>'<&key_physical_attrs '+k.join(' ')+'>').join(', ') + ';\n };\n};';
     const got = C.parsePhysicalLayouts(src);
     t('内蔵と同じ座標を取り出せる', got.length === 1
@@ -315,19 +354,152 @@ section('レイアウトの取り込み');
   t('ヘルプに記載がある', html.includes('<b>「レイアウトを探す」</b>'));
 }
 
+section('同期・ピッカー・切り替えの改善(v4.7.0)');
+{
+  // S1(発展形): 同期はリンク単位になり、設定は宣言値のみ使用
+  t('同期画面に設定セレクタが無い',
+    !['plat-src-loc','plat-src-os','plat-dst-loc','plat-dst-os'].some(id=>html.includes(id)));
+  t('変換は宣言値を使う(computeLinkSync)',
+    scripts[0][1].includes('localeOfGroup(state.groups, mGi)'));
+  t('実行時に宣言を上書きしない', !ui.includes('state.groups[gi].locale = srcLoc'));
+
+  // S2: 差分をキー面で表示
+  t('差分描画の関数がある', ui.includes('function diffFace(raw, loc, os)'));
+  t('差分がキー面表示を使う', ui.includes('diffFace(d.before, loc, os)'));
+  t('種類は日本語の札', ui.includes("'記号の位置合わせ'") && ui.includes("'ショートカット'")
+    && ui.includes("'レイヤー番号の調整'"));
+  t('mod-morphの自動生成は明示する', ui.includes("'mod-morph自動生成'") && html.includes('.dkind.dmorph{'));
+  t('内部コードはtitleに退避', ui.includes("sp.title = d.before + '  →  ' + d.after;"));
+  t('キー面のスタイルがある', html.includes('.dface{') && html.includes('.dkind{'));
+
+  // 提案4最小案は実装後に方針変更で撤去した(v4.8.0)。復活していないことを確認
+  t('ピッカーに折りたたみが無い(撤去済み)', !html.includes('id="p-detail"') && !ui.includes('autoPickerDetail'));
+
+  // K3: 全利用環境への配置
+  t('全環境配置のチェックがある', html.includes('id="sw-all"'));
+  t('対応レイヤーの同じ位置へ書き込む',
+    /sw-all'\)\.checked[\s\S]{0,400}x\.start \+ k/.test(ui));
+  t('範囲外のグループは飛ばす', ui.includes('if(tgt===li || k>=x.count || !state.layers[tgt]) return;'));
+}
+
+section('レイヤー行の整理(v4.6.0)');
+{
+  const seg = ui.slice(ui.indexOf('function renderLayers()'), ui.indexOf('function renderLayers()')+4800);
+  t('役割バッジ(ベース/利用環境)が無い', !seg.includes('envrole'));
+  t('長い重複表記(envmeta)が無い', !seg.includes('envmeta'));
+  t('行内の色ピッカーが無い', !seg.includes('gcolor'));
+  t('色は設定ダイアログ内にある', html.includes('id="es-color"'));
+  t('色を既定に戻せる', html.includes('id="es-color-clear"'));
+  t('保存で色が書き込まれる', /es-color'\)\.value;[\s\S]{0,120}g\.color = col/.test(ui) || ui.includes('g.color = col'));
+  // 掴む場所(グリップ)が名前より前に生成・配置される
+  t('掴む場所が行の先頭',
+    seg.indexOf("grip.className = 'ghandle'") >= 0
+    && seg.indexOf("grip.className = 'ghandle'") < seg.indexOf("s.className='lsep"), '');
+  t('▲▼のボタンは無い', !seg.includes("textContent='▲'") && !seg.includes("textContent='▼'"));
+  t('掴めることが見た目に出る',
+    html.includes('.ghandle{') && html.includes('cursor:grab'));
+  t('追加ボタンは「＋」', ui.includes("gadd.textContent = simple ? '＋ 利用環境を追加' : '＋';"));
+  // 利用環境が1つのときは、行の左3列(掴む場所・名前・チップ)を作らない
+  t('1つのときはメタ列を作らない', ui.includes('const META_COLS = simple ? 0 : 3;'));
+  t('隠すのではなく置かない',
+    ui.includes('if(!simple){ row.appendChild(grip); row.appendChild(s); }')
+    && ui.includes('if(!simple) row.appendChild(chip);'));
+  t('追加ボタンの言葉に英訳がある', scripts[0][1].includes("'＋ 利用環境を追加':"));
+  // 追加ボタンを1列目に入れると、その列がボタン幅まで広がり真上のタブが伸びる
+  t('追加ボタンは列の幅に影響させない',
+    ui.includes("gadd.style.gridColumn = '1 / -1';") && ui.includes("gadd.style.justifySelf = 'start';"));
+  t('チップに編集の印がある', html.includes(".envchip::after{content:' ✎'"));
+}
+
+section('UI整理(v4.5.0)');
+{
+  /* ポートフォリオ提出前の整理。配置の一貫性と「AIの既定出力」らしさの除去。 */
+
+  // コンセプト外機能の削除
+  t('キーテスターが無い', !html.includes('ktest'));
+  t('RGBカテゴリが無い', !html.includes("['RGBライト'"));
+  t('rgb_ug のパース対応は残る(既存keymapを壊さない)', html.includes("'rgb_ug'"));
+
+  // 表示設定はメニューの「表示」節へ
+  t('メニューに節ラベルがある',
+    html.includes('<div class="mlabel">ファイル</div>') && html.includes('<div class="mlabel">表示</div>')
+    && html.includes('<div class="mlabel">道具</div>'));
+  {
+    const menu = html.match(/<div id="hmenu"[\s\S]*?<\/div>\n  <\/div>/)[0];
+    ['btn-lang','btn-theme','btn-lnum','btn-combo-ov','btn-reset'].forEach(id=>{
+      t('メニュー内にある: '+id, menu.includes('id="'+id+'"'));
+    });
+  }
+  // 下段は「レイヤー」と「ビヘイビア設定」の2節だけ
+  t('「表示切り替え」節が無い', !html.includes('>表示切り替え</span>'));
+  {
+    const tb = html.match(/<div id="toolbar2">[\s\S]*?<\/div>\n<\/div>/)[0];
+    t('順序点検ボタンが撤去されている',
+      !html.includes('btn-order') && !html.includes('order-bg') && !ui.includes('renderOrderCheck'));
+    t('下段に表示設定が残っていない',
+      !tb.includes('btn-lang') && !tb.includes('btn-theme') && !tb.includes('btn-lnum') && !tb.includes('btn-combo-ov'));
+  }
+
+  // 装飾記号の除去(意味のある ＋ ✕ ▽ ↶ ↷ ☰ は残す)
+  {
+    const deco = [...html.matchAll(/<button[^>]*>([^<]{1,44})</g)]
+      .map(m=>m[1].trim())
+      .filter(t2=>/^[⇧⇥⇆⇅⊞⇋‥⇓▶∧⚙◉◐№🌐💾📋⌘？✓]/.test(t2));
+    t('装飾記号で始まるボタンが無い', deco.length===0, deco.slice(0,5).join(' | '));
+  }
+  t('言語ボタンは文字表記', html.includes('Language: 日本語'));
+  t('動的な文言側も記号なし',
+    ui.includes("'テーマ: 自動'") && ui.includes("'レイヤー番号: fw実番号'") && ui.includes("'Combo表示: '"));
+  t('i18nキーも新ラベルに揃っている',
+    scripts[0][1].includes("'テーマ: 自動':'Theme: Auto'") && scripts[0][1].includes("'レイヤー番号: 利用環境ごと':"));
+
+  // 旧US/JIS前提の残骸
+  t('layers未指定のコンボは全レイヤーに効く表示',
+    /function defaultComboLayers[\s\S]{0,220}state\.layers\.forEach/.test(ui));
+  t('グループ名の文字列一致が残っていない',
+    !/defaultComboLayers[\s\S]{0,220}r\.name==='US'/.test(ui));
+  t('renameGroupの旧confirmが無い', !ui.includes('US⇄JIS変換が対象とする名前'));
+}
+
+section('キーボード画面の整理(v4.4.0)');
+{
+  // 「使用」(配置を保ったままの切り替え)は配列が崩れるだけなので廃止した
+  t('「使用」ボタンが無い', !ui.includes("textContent='使用'"));
+  t('切り替え処理も残っていない', !ui.includes('switchKeyboard'));
+  t('ヒントからも消えている', !html.includes('「使用」'));
+  t('新規作成は残っている', ui.includes("bn.textContent='新規作成'"));
+  t('「内蔵」のグレー表記が無い', !html.includes('dimtxt">内蔵'));
+
+  // 入手先と他ツールとの行き来のヘルプ
+  t('入手先のヘルプがある', html.includes('<dt>キーボードの形はどこから手に入る?</dt>'));
+  t('KLEが読めないことを明記', html.includes('Keyboard Layout Editor（KLE）のファイルは読み込めません'));
+  t('他ツールとの行き来のヘルプがある', html.includes('<dt>他のツールとの行き来</dt>'));
+  t('keymap-editorと行き来できることを明記', html.includes('keymap-editor'));
+  t('Studioから取り込めないことを明記', html.includes('ZMK Studio からの取り込みはできません'));
+  t('Studioの上書き注意を明記', html.includes('Restore Stock Settings'));
+
+  // 自作プロファイルのバックアップ
+  t('バックアップに自作プロファイルが入る', ui.includes('kbProfiles: kbLibLoad()'));
+  t('復元で自作プロファイルが戻る', ui.includes('o.kbProfiles.forEach'));
+  t('復元は既存とidが重ならないものだけ足す', ui.includes("!lib.some(x=>x.id===kp.id)"));
+}
+
 section('内蔵キーボード');
 {
   /* 物理レイアウトはZMK公式の定義を取り込んだもの。座標が1つでもずれると
      盤面の並びが実機と食い違い、配置を設計できなくなる。 */
   const P = C.BUILTIN_PROFILES;
   t('内蔵プロファイルがある', Array.isArray(P) && P.length >= 8, String(P.length));
-  t('既定のHHKBが先頭', P[0].id === 'hhkb', P[0].id);
+  t('既定のCorneが先頭', P[0].id === 'corne6', P[0].id);
+  t('おさかなが入っている', P.some(p=>p.id==='fish'));
+  t('一体型と分割の両方がある',
+    P.some(p=>p.rows.every(r=>r[1]===r[2])) && P.some(p=>p.rows.some(r=>r[1]<r[2])));
   t('roBaも残っている', P.some(p=>p.id==='roba'));
   t('idが重複しない', new Set(P.map(p=>p.id)).size === P.length,
     P.map(p=>p.id).join(','));
   t('名前が重複しない', new Set(P.map(p=>p.name)).size === P.length);
 
-  const want = {hhkb:60, roba:43, corne6:42, corne5:36, lily58:58, sofle:60,
+  const want = {corne6:42, roba:43, fish:32, sweep:34, corne5:36, lily58:58, sofle:60,
                 ortho4x12:48, ortho4x10:40, ortho5x12:60};
   Object.entries(want).forEach(([id, n])=>{
     const p = C.builtinProfile(id);
@@ -415,7 +587,7 @@ section('内蔵キーボード');
   t('一覧が内蔵プロファイル全体から作られる',
     ui.includes('BUILTIN_PROFILES.map(p=>({p, builtin:true}))'));
   t('補足の説明が出る', ui.includes('p.note?'));
-  t('ヘルプに一覧がある', html.includes('<tr><td>Corne（6列 / crkbd）</td><td>42</td></tr>'));
+  t('ヘルプに一覧がある', html.includes('<td>42</td>') && html.includes('Corne'));
 }
 
 section('13-a キーボード抽象化');
@@ -470,6 +642,186 @@ section('Windows互換チェック');
 }
 
 /* ---------- 6.7 利用環境間のレイヤー参照 ---------- */
+section('リンク単位の同期と格子表示');
+{
+  const mk = ()=>({
+    groups:[{name:'USWIN',count:2,locale:'us',platform:'win'},
+            {name:'JISWIN',count:2,locale:'jis',platform:'win'},
+            {name:'USMAC',count:1,locale:'us',platform:'mac'}],
+    layers:[
+      {name:'base',bindings:['&kp LBKT','&kp LC(C)','&mo 1'],shiftLayer:true},
+      {name:'num',bindings:['&kp N1','&trans','&trans'],shiftLayer:false},
+      {name:'base',bindings:['&kp A','&kp A','&kp A'],shiftLayer:true},
+      {name:'num',bindings:['&kp A','&trans','&trans'],shiftLayer:false},
+      {name:'base',bindings:['&kp A','&kp A','&kp A'],shiftLayer:true}],
+    links:[[0,2,4],[1,3]],
+    behaviors:{morphs:[],tds:[],hts:[],raws:[]}, macros:{items:[],raws:[]}, combos:[]});
+
+  // 差異の検出
+  {
+    const st = mk();
+    t('差異のあるリンクが分かる', JSON.stringify(C.linksWithDiffs(st))==='[0,1]');
+    t('一致したリンクは差異なし', (()=>{
+      const s2 = mk();
+      // リンク2を揃える
+      const r = C.computeLinkSync(s2, s2.links[1], 1);
+      C.applyLinkSync(s2, r, new Set());
+      return !C.linkHasDiffs(s2, s2.links[1]);
+    })());
+  }
+
+  // マスターからの差分計算と適用
+  {
+    const st = mk();
+    const r = C.computeLinkSync(st, st.links[0], 0);   // US-Winの base をマスターに
+    t('メンバーごとの差分が出る', r.targets.length===2);
+    const jis = r.targets.find(t2=>st.groups[t2.gi].name==='JISWIN');
+    const mac = r.targets.find(t2=>st.groups[t2.gi].name==='USMAC');
+    t('JIS側は記号が置き換わる', jis.diffs.some(d=>d.pos===0 && d.after==='&kp RBKT'),
+      JSON.stringify(jis.diffs.map(d=>d.after)));
+    t('Mac側はCtrlがCmdになる', mac.diffs.some(d=>d.pos===1 && d.after==='&kp LG(C)'));
+    t('レイヤー参照は各利用環境の中へ', jis.diffs.some(d=>d.pos===2 && d.after==='&mo 3'),
+      JSON.stringify(jis.diffs));
+    t('Mac側(1枚だけの利用環境)の参照は範囲内',
+      !mac.diffs.some(d=>{ const m=d.after.match(/^&mo (\d+)/); return m && Number(m[1])>=st.layers.length; }));
+    // 一部を外して適用
+    const res = C.applyLinkSync(st, r, new Set(['2:0']));
+    t('外したキーは変更されない', st.layers[2].bindings[0]==='&kp A');
+    t('他は適用される', st.layers[2].bindings[1]==='&kp LC(C)' && st.layers[4].bindings[1]==='&kp LG(C)');
+    t('適用件数が返る', res.applied > 0);
+  }
+  // マスターを変えると向きが変わる
+  {
+    const st = mk();
+    const r = C.computeLinkSync(st, st.links[0], 2);   // JIS側をマスターに
+    const us = r.targets.find(t2=>st.groups[t2.gi].name==='USWIN');
+    t('マスターを変えると流れる向きも変わる', us.diffs.length > 0);
+  }
+
+  // 格子の列割り当て
+  {
+    const g = [{name:'A',count:3},{name:'B',count:2},{name:'C',count:2}];
+    const r1 = C.linkColumns([[1,4,6]], g, 7);
+    t('リンクの全員が同じ列', r1.col[1]===r1.col[4] && r1.col[4]===r1.col[6]);
+    t('リンク前の未リンクは前の列', r1.col[0] < r1.col[1] && r1.col[3] < r1.col[4] && r1.col[5] < r1.col[6]);
+    const r2 = C.linkColumns([[2,3]], g, 7);
+    t('枚数が違っても揃う', r2.col[2]===r2.col[3], JSON.stringify(r2.col));
+    const r3 = C.linkColumns([[0,4],[1,3]], g, 7);
+    t('交差しても停止しない', typeof r3.cols==='number' && Object.keys(r3.col).length===7);
+    t('リンクなしでも動く', C.linkColumns([], g, 7).cols===3);
+  }
+
+  // 画面
+  t('同期ダイアログがリンク方式', html.includes('id="lk-list"') && html.includes('id="lk-master"'));
+  t('リンクの作成UIがある', html.includes('id="lk-create"'));
+  t('リンク解除ができる', ui.includes("del.textContent = '解除';"));
+  t('差異があるときボタンを強調', ui.includes("bp.classList.toggle('attention', n > 0)"));
+  t('強調のスタイルがある', html.includes('button.attention{'));
+  t('格子のスタイルがある', html.includes('#layerbar.lgrid{display:grid'));
+  t('破線接続のスタイルがある', html.includes('.ltab.linked-up::before'));
+  t('旧・環境間一括同期が残っていない', !ui.includes('platSyncFromGroups'));
+}
+
+section('複製ダイアログとD&D制限');
+{
+  // 利用環境をまたぐD&D移動は廃止(リンクの対応関係を黙って壊すため)
+  t('またぐ移動を拒否する', ui.includes('利用環境をまたぐ移動はできません'));
+  t('拒否は移動と末尾ドロップの両方', ['function moveLayerTo(','function moveLayerToEndOf(']
+    .every(f=>ui.slice(ui.indexOf(f), ui.indexOf(f)+900).includes('利用環境をまたぐ移動はできません')));
+  t('その文言に英訳がある', scripts[1][1].includes("'利用環境をまたぐ移動はできません"));
+  t('複製ダイアログがある', html.includes('id="cpy-bg"') && html.includes('id="cpy-env"'));
+  t('リンクするかを選べる', html.includes('id="cpy-link"'));
+  t('別の利用環境へは変換して複製', /cpy-exec[\s\S]{0,2000}convBindingFull\(b, srcLoc, dstLoc/.test(ui));
+  t('複製先が同じならその場に複製', /cpy-exec[\s\S]{0,600}copyLayerAt\(state, i\)/.test(ui));
+  t('リンクは正規化してから保存', /cpy-exec[\s\S]{0,3000}normalizeLinks\(state\.links/.test(ui));
+}
+
+section('レイヤーリンクの基盤');
+{
+  /* 利用環境をまたいで「同じ役割のレイヤー」を対応付ける。同期はこの単位で行う。 */
+  const g = [{name:'WIN',count:2},{name:'MAC',count:2},{name:'IPAD',count:1}];
+
+  // 正規化(不変条件)
+  t('正しいリンクは通る', JSON.stringify(C.normalizeLinks([[0,2,4],[1,3]], g, 5))==='[[0,2,4],[1,3]]');
+  t('1枚だけのリンクは消える', C.normalizeLinks([[2]], g, 5).length===0);
+  t('同じ利用環境の2枚目は外れる', JSON.stringify(C.normalizeLinks([[0,1,2]], g, 5))==='[[0,2]]');
+  t('1枚のレイヤーは1リンクまで', JSON.stringify(C.normalizeLinks([[0,2],[0,3]], g, 5))==='[[0,2]]',
+    JSON.stringify(C.normalizeLinks([[0,2],[0,3]], g, 5)));
+  t('存在しない番号は外れる', JSON.stringify(C.normalizeLinks([[0,2,99]], g, 5))==='[[0,2]]');
+  t('空でも落ちない', C.normalizeLinks(null, g, 5).length===0 && C.normalizeLinks([], [], 0).length===0);
+  t('linkOf が引ける', C.linkOf([[0,2],[1,3]], 3)===1 && C.linkOf([[0,2]], 4)===-1);
+
+  // 並べ替え・削除への追従
+  t('並べ替えに追従する', JSON.stringify(C.remapLinks([[0,2],[1,3]], {0:1,1:0}, 4))==='[[1,2],[0,3]]');
+  t('往復で元に戻る',
+    JSON.stringify(C.remapLinks(C.remapLinks([[0,2],[1,3]], {0:1,1:0}, 4), {0:1,1:0}, 4))==='[[0,2],[1,3]]');
+  t('削除でリンクから外れる', JSON.stringify(C.dropFromLinks([[0,2,4],[1,3]], 2))==='[[0,4],[1,3]]');
+  t('外れて1枚になったリンクは消える', C.dropFromLinks([[1,3]], 3).length===0);
+
+  // 保存(案B): keymapノード先頭のコメント1行
+  {
+    const st = {groups:g, layers:[{name:'base'},{name:'num'},{name:'base'},{name:'num'},{name:'cfg'}],
+                links:[[0,2,4],[1,3]]};
+    const c = C.linksComment(st);
+    t('コメント1行で書ける', c.trim()==='// zmk-links: WIN_01_base=MAC_01_base=IPAD_01_cfg; WIN_02_num=MAC_02_num', c.trim());
+    const back = C.parseLinks('keymap {\n'+c+'\n}', st.layers, st.groups);
+    t('コメントから読み戻せる', JSON.stringify(back)===JSON.stringify(st.links), JSON.stringify(back));
+    t('リンクなしなら書かない', C.linksComment({links:[]})==='' && C.linksComment({})==='');
+    t('コメントが無ければ空', C.parseLinks('keymap { }', st.layers, st.groups).length===0);
+    t('壊れたコメントでも落ちない',
+      (()=>{ try{ C.parseLinks('// zmk-links: ���=;;=', st.layers, st.groups); return true; }catch(e){ return false; } })());
+  }
+
+  // 実データでの完全往復(書き出し→読み直し)
+  {
+    const raw = C.DEFAULT_KEYMAP;
+    const st = C.parseKeymap(raw); st.originalText = raw;
+    st.combos = C.parseCombos(raw); st.behaviors = C.parseBehaviors(raw);
+    st.macros = C.parseMacros(raw); st.condLayers = C.parseCondLayers(raw); st.trackball = C.parseTrackball(raw);
+    st.layers = st.layers.slice(0, 2);          // 2層 × 2利用環境の形にする
+    st.layers.push({name:'default_layer', displayName:null, bindings:st.layers[0].bindings.slice(), sensor:null, shiftLayer:false});
+    st.layers.push({name:'fn_layer', displayName:null, bindings:st.layers[1].bindings.slice(), sensor:null, shiftLayer:false});
+    st.groups = [{name:'WIN',count:2,locale:'jis',platform:'win'},{name:'MAC',count:2,locale:'us',platform:'mac'}];
+    st.links = [[0,2],[1,3]];
+    const out = C.generateKeymap(st);
+    {
+      // 書き出し時はfw順に組み替わるため、並びに依存せず組で確認する
+      const linkLine = (out.match(/\/\/ zmk-links: ([^\n]+)/)||[])[1]||'';
+      const pairs = linkLine.split(';').map(x=>x.trim().split('=').sort().join('='));
+      const fw = C.stateInFwOrder(st);
+      const want = [C.nodeNameFor(fw,0), C.nodeNameFor(fw,2)].sort().join('=');
+      t('書き出しにコメントが入る', pairs.includes(want), linkLine+' / 期待 '+want);
+    }
+    t('コメントは1行だけ', (out.match(/zmk-links/g)||[]).length===1);
+    const re = C.parseKeymap(out);
+    const links2 = C.parseLinks(out, re.layers, [{name:'WIN',count:2},{name:'MAC',count:2}]);
+    t('読み直してリンクが一致', JSON.stringify(links2)===JSON.stringify(st.links), JSON.stringify(links2));
+    t('レイヤー自体も往復する', re.layers.length===st.layers.length);
+  }
+
+  // 並べ替え・削除の実操作にリンクがついてくること(remapAllRefs経由)
+  {
+    const st = {layers:[{name:'a',bindings:['&kp A']},{name:'b',bindings:['&kp B']},
+                        {name:'c',bindings:['&kp C']},{name:'d',bindings:['&kp D']}],
+                groups:[{name:'X',count:2},{name:'Y',count:2}],
+                links:[[0,2],[1,3]], combos:[], condLayers:[]};
+    C.reorderLayers(st, [1,0,2,3]);
+    t('並べ替えの実操作にリンクが追従する',
+      JSON.stringify(st.links)==='[[1,2],[0,3]]', JSON.stringify(st.links));
+    C.reorderLayers(st, [1,0,2,3]);
+    t('戻すとリンクも戻る', JSON.stringify(st.links)==='[[0,2],[1,3]]');
+    const r = C.deleteLayerAt(st, 2);
+    t('削除の実操作でリンクから外れて詰まる',
+      JSON.stringify(st.links)==='[[1,2]]', JSON.stringify(st.links));
+  }
+
+  // 保存対象に含まれる(Undo・バックアップ・ブラウザ保存)
+  t('STATE_KEYS に links がある', C.STATE_KEYS.includes('links'));
+  t('pickState が正規化する',
+    JSON.stringify(C.pickState({layers:[{},{},{},{}], groups:g.slice(0,2), links:[[0,2],[5,9]]}).links)==='[[0,2]]');
+  t('layersが無い復元でも落ちない', Array.isArray(C.pickState({}).links));
+}
+
 section('状態の保存・復元');
 {
   /* 保存先が3つある(Undo履歴 / ブラウザ保存 / バックアップJSON)。
@@ -520,7 +872,9 @@ section('状態の保存・復元');
     // holdtap:{mt:..} のような入れ子を数えないよう、深さ0の部分だけ見る。
     const fresh = ui.slice(ui.indexOf('function freshState('));
     const body = fresh.slice(0, fresh.indexOf('\n}\n'));
-    const inner = body.slice(body.lastIndexOf('return {') + 8);
+    // freshState は `return {…}` でも `const st = {…}` でも良い(読み込み後に手を入れるため)
+    const anchor = Math.max(body.lastIndexOf('return {'), body.lastIndexOf('const st = {'));
+    const inner = body.slice(body.indexOf('{', anchor) + 1);
     let depth = 0, top = '';
     for (const ch of inner) {
       if (ch === '{' || ch === '(' || ch === '[') { depth++; continue; }
@@ -834,19 +1188,31 @@ section('レイヤーの複製・削除・移動');
     t('末尾への追加では参照が動かない', s.combos[0].layers.join(',')==='2,3');
   }
   {
+    /* 利用環境の並べ替え。「gj の手前へ入れる」という決まりで動く。
+       直後(gi+1)へ入れるのは、自分を抜いて同じ場所へ戻すのと同じで並びが変わらない。
+       画面でガイドを出さない位置は、この性質をそのまま使っている。 */
     const s = mk();
-    const perm = C.swapGroups(s, 0, 1);
-    t('グループが入れ替わる', s.groups.map(g=>g.name).join(',')==='B,A', s.groups.map(g=>g.name).join(','));
-    t('レイヤーも入れ替わる', s.layers.map(l=>l.name).join(',')==='B0,B1,A0,A1',
-      s.layers.map(l=>l.name).join(','));
-    t('入れ替えで参照が追従する', s.layers[2].bindings[0]==='&mo 3', s.layers[2].bindings[0]);
-    t('入れ替えでコンボのlayersも追従', s.combos[0].layers.join(',')==='0,1', s.combos[0].layers.join(','));
-    t('入れ替えの対応表が返る', perm[0]===2 && perm[2]===0);
-    C.swapGroups(s, 0, 1);
-    t('入れ替えは往復で元に戻る', s.layers.map(l=>l.name).join(',')==='A0,A1,B0,B1');
+    const o1 = C.orderForGroupMove(s.groups, 0, 1);
+    t('直後へ入れても並びが変わらない', o1.groupOrder.join(',')==='0,1', o1.groupOrder.join(','));
+    t('直後へ入れてもレイヤーが動かない', o1.order.join(',')==='0,1,2,3', o1.order.join(','));
+    const o2 = C.orderForGroupMove(s.groups, 1, 0);
+    t('手前へ入れると入れ替わる', o2.groupOrder.join(',')==='1,0', o2.groupOrder.join(','));
+    t('レイヤーの並びも付いてくる', o2.order.join(',')==='2,3,0,1', o2.order.join(','));
+    const o3 = C.orderForGroupMove(s.groups, 0, 2);
+    t('末尾へ入れられる', o3.groupOrder.join(',')==='1,0', o3.groupOrder.join(','));
+    t('自分の位置へ入れても変わらない',
+      C.orderForGroupMove(s.groups, 1, 1).groupOrder.join(',')==='0,1');
   }
   t('レイヤー追加はcoreの処理を使う', ui.includes('addLayerAt(state, gi)'));
-  t('グループ入れ替えはcoreの処理を使う', ui.includes('swapGroups(state, gi, gj)'));
+  // 最初の利用環境の名前
+  t('既定の利用環境名は Default',
+    ui.includes("{name:'Default', count:layers.length}")
+    && ui.includes("{name:'Default', count:state.layers.length}"));
+  t('MAIN という名前は残っていない', !ui.includes("name:'MAIN'"));
+  // 並べ替えに確認は挟まない(参照はすべて自動で付け替わる)
+  t('利用環境の並べ替えで確認しない',
+    /function moveGroupTo\(gi, gj\)\{[\s\S]{0,400}?\n\}/.exec(ui)[0].indexOf('uiConfirm') < 0);
+  t('利用環境の並べ替えはcoreの処理を使う', ui.includes('orderForGroupMove(state.groups, gi, gj)'));
 }
 
 section('利用環境間のレイヤー参照');
@@ -890,9 +1256,10 @@ section('用語 / 利用環境が1つ');
   t('用語が一箇所にまとまっている', typeof C.TERMS==='object' && !!C.TERMS.env && !!C.TERMS.shared);
   t('term() が引ける', C.term('env')===C.TERMS.env && C.term('unknown')==='unknown');
   t('envCount / isSimpleMode がUIにある', ui.includes('function envCount') && ui.includes('function isSimpleMode'));
-  t('利用環境が1つでボタンを隠す処理がある', ui.includes("['btn-platform','btn-switcher','btn-order']"));
+  t('利用環境が1つならレイヤー節ごと隠す',
+    html.includes('id="trow-layer"') && /trow[\s\S]{0,80}simpleNow\? 'none'/.test(ui));
   t('共有という種別を持たない', !ui.includes('isSharedGroup') && !ui.includes('wantShared'));
-  t('配列に「設定なし」がある', ui.includes("'<option value=\"\">設定なし</option>'"));
+  t('配列に「設定なし」がある', ui.includes('設定なし</option>'));
 }
 
 /* ---------- 6.75 レイヤー順序の検査 ---------- */
@@ -905,15 +1272,15 @@ section('利用環境追加ウィザード');
     !ui.includes('pendingConv') && !ui.includes('openConvDialog')
     && !ui.includes('computeConvDiffs') && !ui.includes('convDiffCount'));
   // 削除で巻き添えになりやすい近隣機能が生きていること
-  t('mod-morph登録処理は残っている',
-    ui.includes('function registerJisMorphs') && ui.includes('function pruneJisMorphs'));
+  t('使わなくなった自動morphの掃除は残っている',
+    ui.includes('function pruneGeneratedMorphs') && ui.includes('function syncGeneratedMorphs'));
   t('jis_* のロック判定は残っている', ui.includes('function isAutoJis'));
 
   // ウィザード本体
   t('コピーしない場合は1レイヤーだけ作る',
     /ae-create[\s\S]{0,1400}Array\(n\)\.fill\('&trans'\)/.test(ui));
-  t('作成後に順序の問題を知らせる',
-    /ae-create[\s\S]{0,3400}findShadowedRefs\(state\.groups, state\.layers\)/.test(ui));
+  t('作成後に自動整列でも直せない呼び出しを知らせる',
+    /ae-create[\s\S]{0,3400}stateInFwOrder\(state\)/.test(ui));
 
   // ヘルプとi18n
   t('ヘルプに利用環境の追加がある', html.includes('<dt>利用環境の追加</dt>'));
@@ -1006,7 +1373,7 @@ section('利用環境追加ウィザードの実動作');
     const re = C.parseKeymap(out);
     t('読み直してレイヤー数が一致', re.layers.length === st.layers.length, re.layers.length+' vs '+st.layers.length);
     t('読み直して中身が一致',
-      JSON.stringify(re.layers.map(l=>l.bindings)) === JSON.stringify(st.layers.map(l=>l.bindings)));
+      JSON.stringify(re.layers.map(l=>l.bindings)) === JSON.stringify(C.stateInFwOrder(st).layers.map(l=>l.bindings)));
   }
 }
 
@@ -1269,6 +1636,104 @@ section('マクロ等の利用環境別対応');
   t('ヘルプに記載がある', html.includes('<dt>マクロ・tap-dance と利用環境</dt>'));
 }
 
+section('fw実番号の自動整列');
+{
+  /* UI上の並びと、書き出す.keymapのレイヤー番号を切り離した。
+     ユーザーに並べ替えを促す代わりに、ツールが安全な並びを決める。 */
+  const mk = n => Array.from({length:n},(_,i)=>({name:'L'+i, displayName:null,
+    bindings:Array(43).fill('&kp A'), sensor:null, shiftLayer:false}));
+
+  // ① 共通層(GEN)を前に置いても、書き出しでは後ろへ回る
+  {
+    const groups = [{name:'GEN',count:2},{name:'US',count:2}];
+    const L = mk(4);
+    L[2].bindings[0] = '&mo 1';               // US(fw2〜) から GEN(fw1) を呼ぶ
+    const o = C.fwOrder(groups, L);
+    t('呼ばれる利用環境が後ろへ回る', JSON.stringify(o)==='[2,3,0,1]', JSON.stringify(o));
+    t('並べ替え後は隠れる参照が無い', (()=>{
+      const st = {groups:groups.map(g=>({...g})), layers:L.map(l=>({...l, bindings:l.bindings.slice()})),
+        combos:[], behaviors:{morphs:[],tds:[],raws:[],hts:[]}, condLayers:[], links:[]};
+      const fw = C.stateInFwOrder(st);
+      return C.findShadowedRefs(fw.groups, fw.layers).length===0;
+    })());
+  }
+
+  // ② 利用環境の中でも並べ替える(先頭＝切り替え先は固定)
+  {
+    const groups = [{name:'MAIN',count:3}];
+    const L = mk(3);
+    L[2].bindings[0] = '&mo 1';               // 後ろのレイヤーから前を呼ぶ
+    const o = C.fwOrder(groups, L);
+    t('利用環境の中でも呼ばれる側を後ろへ', JSON.stringify(o)==='[0,2,1]', JSON.stringify(o));
+    t('先頭レイヤーは動かない', o[0]===0);
+  }
+
+  // ③ 呼び合っている(循環)場合は諦めるが、落ちない
+  {
+    const groups = [{name:'A',count:2},{name:'B',count:2}];
+    const L = mk(4);
+    L[0].bindings[0] = '&mo 3';
+    L[2].bindings[0] = '&mo 1';
+    const o = C.fwOrder(groups, L);
+    t('循環でも並びを返す', Array.isArray(o) && o.length===4 && new Set(o).size===4, JSON.stringify(o));
+  }
+
+  // ④ 利用環境に属さないレイヤーがあるときは触らない(取りこぼし防止)
+  {
+    const o = C.fwOrder([{name:'A',count:2}], mk(5));
+    t('数が合わないときは並べ替えない', JSON.stringify(o)==='[0,1,2,3,4]', JSON.stringify(o));
+  }
+
+  // ⑤ 並べ替えが不要ならコメントも書かない
+  {
+    const groups = [{name:'A',count:2},{name:'B',count:2}];
+    const L = mk(4);
+    t('不要なら null', C.fwOrderIfNeeded(groups, L)===null);
+    t('不要ならコメントを書かない', C.orderComment({groups, layers:L})==='');
+  }
+
+  // ⑥ 書き出し→読み込みでUI上の並びが戻る
+  {
+    const raw = C.DEFAULT_KEYMAP;
+    const st = C.parseKeymap(raw); st.originalText = raw;
+    st.combos = C.parseCombos(raw); st.behaviors = C.parseBehaviors(raw);
+    st.macros = C.parseMacros(raw); st.condLayers = C.parseCondLayers(raw); st.trackball = C.parseTrackball(raw);
+    st.layers = st.layers.slice(0, 2);          // 2層 × 2利用環境の形にする
+    st.layers.push({name:'default_layer', displayName:null, bindings:st.layers[0].bindings.slice(), sensor:null, shiftLayer:false});
+    st.layers.push({name:'fn_layer', displayName:null, bindings:st.layers[1].bindings.slice(), sensor:null, shiftLayer:false});
+    st.groups = [{name:'WIN',count:2,locale:'jis',platform:'win'},{name:'MAC',count:2,locale:'us',platform:'mac'}];
+    // 参照を一方向だけにする(双方向だと循環になり、並べ替えられない)
+    st.layers.forEach(L=>{ L.bindings = L.bindings.map(b=>/^&(mo|lt|tog|sl)\b/.test(b)? '&trans' : b); });
+    // MAC から WIN のレイヤーを呼ぶ → 呼ばれる WIN が後ろへ回る
+    st.layers[2].bindings[0] = '&mo 1';
+    const out = C.generateKeymap(st);
+    t('並べ替えたらコメントを書く', /\/\/ zmk-order: /.test(out), out.split('\n').filter(x=>x.includes('zmk-')).join(' | '));
+    const re = C.parseKeymap(out);
+    const groups2 = [{name:'MAC',count:2},{name:'WIN',count:2}];
+    const uo = C.parseOrder(out, re.layers, groups2);
+    t('コメントからUIの並びを読める', Array.isArray(uo) && uo.length===4, JSON.stringify(uo));
+    const back = {layers:re.layers, groups:groups2, combos:[], behaviors:{morphs:[],tds:[],raws:[],hts:[]}, condLayers:[], links:[]};
+    C.reorderWithGroups(back, uo);
+    t('UI上の並びが戻る', back.groups.map(g=>g.name).join(',')==='WIN,MAC', back.groups.map(g=>g.name).join(','));
+    t('中身も元どおり',
+      JSON.stringify(back.layers.map(l=>l.bindings))===JSON.stringify(st.layers.map(l=>l.bindings)));
+  }
+
+  // ⑦ 並べ替えでマクロ内のレイヤー参照も付け替わる(切り替えキーが壊れない)
+  {
+    const st = {layers:mk(4), groups:[{name:'A',count:2},{name:'B',count:2}],
+      combos:[], behaviors:{morphs:[{name:'m1',b1:'&mo 1',b2:'&kp A'}],tds:[],raws:[],hts:[]},
+      condLayers:[], links:[],
+      macros:{items:[{name:'env_b', steps:[{type:'tap', binding:'&to 2'}]}], raws:[]}};
+    st.layers[2].bindings[0] = '&mo 1';
+    const fw = C.stateInFwOrder(st);
+    t('マクロの &to が付け替わる', fw.macros.items[0].steps[0].binding==='&to 0',
+      fw.macros.items[0].steps[0].binding);
+    t('mod-morph の中も付け替わる', fw.behaviors.morphs[0].b1==='&mo 3', fw.behaviors.morphs[0].b1);
+    t('元のstateは変わらない', st.macros.items[0].steps[0].binding==='&to 2');
+  }
+}
+
 section('レイヤー順序');
 {
   // ZMK: レイヤー0は常に有効 / 番号が大きいレイヤーが優先
@@ -1283,9 +1748,9 @@ section('レイヤー順序');
   t('前のレイヤーへの呼び出しを検出', sh.length===1 && sh[0].target===6 && sh[0].groupName==='JIS');
   t('検出内容に位置が含まれる', sh[0].layerIndex===7 && sh[0].pos===0 && sh[0].blockedBy===7);
 
-  // 並べ替えれば解消する
-  const perm = C.orderToFixShadowing(groups, bad);
-  t('並べ替え案が出る', Array.isArray(perm) && JSON.stringify(perm)==='[0,2,1]', JSON.stringify(perm));
+  // 書き出し時の自動整列で解消される(ユーザーに並べ替えさせない)
+  t('自動整列の並びが出る', JSON.stringify(C.fwOrder(groups, bad))
+    === JSON.stringify([0,1,2,3,4,7,8,9,10,11,5,6]), JSON.stringify(C.fwOrder(groups, bad)));
 
   // 先頭グループからの呼び出しは常に安全
   const ok = mk(12);
@@ -1297,7 +1762,6 @@ section('レイヤー順序');
   const ok2 = mk(12);
   ok2[7].bindings[0] = '&mo 9';
   t('後ろのレイヤーは問題なし', C.findShadowedRefs(groups, ok2).length===0);
-  t('問題なければ並べ替え案は出ない', C.orderToFixShadowing(groups, ok2)===null);
 
   // &to は隠れない(そのレイヤーへ移る動作のため)
   const ok3 = mk(12);
@@ -1310,7 +1774,6 @@ section('レイヤー順序');
 
   // 単一グループでは何も起きない
   t('単一グループは常に問題なし', C.findShadowedRefs([{name:'MAIN',count:5}], mk(5)).length===0);
-  t('単一グループは並べ替え不要', C.orderToFixShadowing([{name:'MAIN',count:5}], mk(5))===null);
 
   // ベース層の透過検出
   const tr = mk(12);
@@ -1374,28 +1837,33 @@ section('汎用配列変換');
   });
   t('US→JIS: 変換後も同じ文字が出る', charNg.length===0, charNg.slice(0,4).join(' | '));
 
-  // 汎用エンジンは既存実装より余計なmod-morphを作らないこと
-  let extraMorph = [];
-  ['&kp SQT','&kp EQUAL','&kp N2','&kp MINUS','&kp SEMI','&kp GRAVE','&kp LBKT','&kp BSLH','&kp RBKT'].forEach(b=>{
-    const legacy = C.convBinding(b, null, true).raw.startsWith('&jis_');
-    const generic = conv(b,'us','jis',true).startsWith('&loc_');
-    if(generic && !legacy) extraMorph.push(b);
-  });
-  t('余計なmod-morphを作らない', extraMorph.length===0, extraMorph.join(','));
+  // mod-morph は「Shift面が食い違うキー」にだけ作る。作りすぎない
+  {
+    const needs = ['&kp SQT','&kp EQUAL','&kp MINUS','&kp SEMI','&kp GRAVE','&kp BSLH'];
+    const not   = ['&kp LBKT','&kp RBKT','&kp A','&kp N1','&kp EXCLAMATION'];
+    const ng1 = needs.filter(b=>!conv(b,'us','jis',true).startsWith('&loc_'));
+    const ng2 = not.filter(b=>conv(b,'us','jis',true).startsWith('&loc_'));
+    t('Shift面が食い違うキーはmorphにする', ng1.length===0, ng1.join(','));
+    t('片面で足りるキーはmorphにしない', ng2.length===0, ng2.join(','));
+  }
 
   // 読みやすい別名は保たれる(無意味な差分を出さない)
   t('同じ文字が出るキーは書き換えない', conv('&kp EXCLAMATION','us','jis',true)==='&kp EXCLAMATION'
     && conv('&kp HASH','us','jis',true)==='&kp HASH' && conv('&kp DLLR','us','jis',true)==='&kp DLLR');
 
-  // 既存の US→JIS 実装と、記号の変換結果が一致すること
-  let mismatch2 = [];
-  ['&kp AT_SIGN','&kp CARET','&kp AMPERSAND','&kp ASTERISK','&kp LEFT_PARENTHESIS','&kp RIGHT_PARENTHESIS',
-   '&kp UNDERSCORE','&kp PLUS','&kp LEFT_BRACE','&kp RIGHT_BRACE','&kp PIPE','&kp COLON','&kp DOUBLE_QUOTES','&kp TILDE'].forEach(b=>{
-    const legacy = C.convBinding(b, null, true).raw;
-    const generic = conv(b,'us','jis',true);
-    if(legacy!==generic) mismatch2.push(b+': 既存='+legacy+' / 汎用='+generic);
-  });
-  t('既存US→JIS実装と一致(記号)', mismatch2.length===0, mismatch2.slice(0,3).join(' | '));
+  // 記号は「同じ文字が出る」ところまで確かめる(キーコードの一致ではなく結果で見る)
+  {
+    let ng = [];
+    ['&kp AT_SIGN','&kp CARET','&kp AMPERSAND','&kp ASTERISK','&kp LEFT_PARENTHESIS','&kp RIGHT_PARENTHESIS',
+     '&kp UNDERSCORE','&kp PLUS','&kp LEFT_BRACE','&kp RIGHT_BRACE','&kp PIPE','&kp COLON',
+     '&kp DOUBLE_QUOTES','&kp TILDE'].forEach(b=>{
+      const kc = b.slice(4);
+      const want = C.charFor(kc, 'us');
+      const got = C.charFor(conv(b,'us','jis',true).slice(4), 'jis');
+      if(want && got && want!==got) ng.push(`${kc}: ${want} → ${got}`);
+    });
+    t('記号は変換後も同じ文字が出る', ng.length===0, ng.slice(0,3).join(' | '));
+  }
 
   // --- 文字の並びが違う言語配列(ドイツ語 QWERTZ) ---
   t('QWERTZ: Y⇄Z', conv('&kp Y','us','de',false)==='&kp Z' && conv('&kp Z','us','de',false)==='&kp Y');
@@ -1839,8 +2307,7 @@ section('OSの系統(iOS / Linux / Android)');
 
   // UI
   t('OS選択肢が全OSから作られる', ui.includes('OS_LIST.map(o=>`<option value="${o.id}">'));
-  t('同期の判定が系統ベース', ui.includes('!platformDir(srcOs, dstOs)'));
-  t('系統が同じ場合の案内がある', ui.includes('ショートカットの体系が同じため'));
+  // 系統の判定は convBindingFull(platformDir) が担い、同期はリンク単位の computeLinkSync に一本化された
 }
 
 section('利用環境の設定チップ');
@@ -1848,25 +2315,29 @@ section('利用環境の設定チップ');
   t('一覧にチップを出す', ui.includes("chip.className = 'envchip'"));
   t('チップは短縮名を使う', ui.includes('envSummary(gi, true)'));
   t('ツールチップは正式名を使う', ui.includes('envSummary(gi).text'));
-  t('利用環境が1つでは隠す', ui.includes("if(simple) chip.style.display = 'none';"));
+  // 1つのときは隠すのではなく置かない(隠すと列と列間の間隔が残って左に空白ができる)
+  t('利用環境が1つでは置かない', ui.includes('if(!simple) row.appendChild(chip);'));
   t('チップのスタイルがある', html.includes('.envchip{'));
   t('未設定は破線で示す', html.includes('.envchip.unset{'));
   t('ヘルプに記載がある', html.includes('<dt>利用環境の設定を変える</dt>'));
   t('英訳がある', scripts[0][1].includes("'利用環境の設定':'"));
 
-  // envSummary は state に依存するので、同じ組み立てを再現して確かめる
+  // チップの表記は OS → 配列 の順(v4.6.0)。実装の envSummary と同じ組み立てで確かめる
   const label = (loc, os)=>{
     const full = loc? ((C.LOCALE_LIST.find(l=>l.id===loc)||{}).name || loc) : null;
     const ln = full? full.replace(/\s*[（(].*$/, '') : null;
     const on = os? C.osName(os) : null;
-    if(ln && on) return ln+' × '+on;
-    return ln || on || '配列 / OS を設定';
+    if(ln && on) return on+' × '+ln;
+    return on || ln || 'OS / 配列 を設定';
   };
-  t('両方あると「配列 × OS」', label('jis','win')==='JIS × Windows', label('jis','win'));
+  t('チップは OS → 配列 の順', label('jis','win')==='Windows × JIS', label('jis','win'));
+  t('実装側も同じ順',
+    /return \{text: on\+' × '\+ln, unset:false\}/.test(ui));
+  t('設定ダイアログも OS が先',
+    html.indexOf('id="es-os"') < html.indexOf('id="es-loc"'));
   t('チップでは補足の括弧を落とす', label('us',null)==='US' && label('de',null)==='DE', label('de',null));
-  t('配列名は補足を落として出す', label('uk',null)==='UK', label('uk',null));
   t('OSだけならOS名', label(null,'ios')==='iOS', label(null,'ios'));
-  t('どちらもなければ促す', label(null,null)==='配列 / OS を設定');
+  t('どちらもなければ促す', label(null,null)==='OS / 配列 を設定');
   t('osName が全OSを引ける', C.OS_LIST.every(o=>C.osName(o.id)===o.name));
   t('osName は未知でも落ちない', C.osName('bsd')==='bsd' && C.osName(null)==='');
 }
@@ -2020,7 +2491,7 @@ section('想定利用の通し確認');
     const re = C.parseKeymap(out);
     t('読み直してレイヤー数が一致', re.layers.length===st.layers.length, re.layers.length+' vs '+st.layers.length);
     t('読み直して配置が一致',
-      JSON.stringify(re.layers.map(l=>l.bindings))===JSON.stringify(st.layers.map(l=>l.bindings)));
+      JSON.stringify(re.layers.map(l=>l.bindings))===JSON.stringify(C.stateInFwOrder(st).layers.map(l=>l.bindings)));
     t('読み直してコンボが一致', C.parseCombos(out).length===st.combos.length);
   }
 
@@ -2028,10 +2499,749 @@ section('想定利用の通し確認');
   const shadow = C.findShadowedRefs(st.groups, st.layers);
   t('隠れる参照を検出する', shadow.length>0, JSON.stringify(shadow.map(x=>`${x.groupName}→fw${x.target}`)));
   if(shadow.length){
-    const order = C.orderToFixShadowing(st.groups, st.layers);
-    t('並べ替え案が出る', Array.isArray(order) && order.length===st.groups.length, JSON.stringify(order));
-    t('共通層が最後に回る', order[order.length-1]===1, JSON.stringify(order));
+    // 書き出し時の自動整列で解消される(ユーザーに並べ替えさせない)
+    const fw = C.stateInFwOrder(st);
+    t('自動整列で解消する', C.findShadowedRefs(fw.groups, fw.layers).length===0,
+      JSON.stringify(C.findShadowedRefs(fw.groups, fw.layers).map(x=>x.groupName)));
+    t('共通層が最後に回る', fw.groups[fw.groups.length-1].name==='GEN',
+      fw.groups.map(g=>g.name).join(','));
   }
+}
+
+section('キーボードごとの初期キーマップ');
+{
+  /* 「新規作成」で全部 &trans の盤面が出てくると、最初の一手が分からない。
+     行構成からQWERTY配列を組み立てる。どのキーボードでも同じ組み立て方を使う。 */
+  const profs = C.BUILTIN_PROFILES;
+  profs.forEach(p=>{
+    const txt = C.makeDefaultKeymap(p);
+    const st = C.parseKeymap(txt);
+    t('読める: '+p.id, !st.error && st.layers.length >= 2, st.error || String(st.layers.length));
+    t('キー数が合う: '+p.id,
+      st.layers.every(l=>l.bindings.length === p.keyCount),
+      st.layers.map(l=>l.bindings.length).join(','));
+    const base = st.layers[0].bindings.join(' ');
+    /* 枠が足りない機種(おさかな32キーなど)では、外側の文字から落ちる。
+       どの機種でもホームポジションの文字は必ず入っていること。 */
+    t('ホームポジションの文字が入っている: '+p.id,
+      ['A','S','D','F','J','K','L'].every(k=>new RegExp('&kp '+k+'(\\s|$)').test(base)), p.id);
+    t('中央寄りの文字から埋まる: '+p.id,
+      /&kp E(\s|$)/.test(base) && /&kp R(\s|$)/.test(base) && /&kp U(\s|$)/.test(base), p.id);
+    t('打てる状態になっている: '+p.id,
+      /&kp SPACE/.test(base) && /&mo 1/.test(base));
+    t('壊れたバインディングがない: '+p.id,
+      st.layers.every(l=>l.bindings.every(b=>/^&\w/.test(b.trim()))));
+  });
+
+  // 数字段の有無で層の数が変わる
+  t('数字段があれば2層', C.parseKeymap(C.makeDefaultKeymap(C.builtinProfile('lily58'))).layers.length===2);
+  t('数字段が無ければ3層(数字/記号の層を足す)',
+    C.parseKeymap(C.makeDefaultKeymap(C.builtinProfile('corne6'))).layers.length===3);
+  {
+    const st = C.parseKeymap(C.makeDefaultKeymap(C.builtinProfile('corne6')));
+    t('数字の層に数字が入る', st.layers[1].bindings.join(' ').includes('&kp N1'));
+    t('記号も入る', st.layers[1].bindings.join(' ').includes('&kp EXCL'));
+    t('fnの層にF1が入る', st.layers[2].bindings.join(' ').includes('&kp F1'));
+    t('fnの層に矢印が入る', st.layers[2].bindings.join(' ').includes('&kp LEFT'));
+    t('fnの層にBluetoothが入る', st.layers[2].bindings.join(' ').includes('&bt BT_SEL 0'));
+    t('補助の層は基本が透過', st.layers[1].bindings.filter(b=>b==='&trans').length >= 4);
+  }
+
+  // 分割の内側に増えた列は決め打ちしない
+  {
+    const st = C.parseKeymap(C.makeDefaultKeymap(C.builtinProfile('lily58')));
+    const r = C.builtinProfile('lily58').rows[3];
+    const row = st.layers[0].bindings.slice(r[0], r[0]+r[2]);
+    t('内側の追加列は透過のまま', row[6]==='&trans' && row[7]==='&trans', row.join(' '));
+    t('両端は修飾キー', row[0]==='&kp LSHFT' && row[row.length-1]==='&kp RSHFT', row[0]+' / '+row[row.length-1]);
+    // 補助レイヤーの位置も、内側の追加列の分だけずれていること
+    const fn = st.layers[1].bindings.slice(r[0], r[0]+r[2]);
+    t('右手側の位置が追加列の分ずれる', fn[8]==='&bt BT_CLR', fn.map((b,i)=>i+':'+b).filter(x=>!/&trans/.test(x)).join(' '));
+    t('左手側は動かない', fn[1]==='&bt BT_SEL 0', fn[1]);
+  }
+
+  /* いちばん効く一本: どのプリセットでも、生成したキーマップのキー数が
+     盤面のキー数と一致すること。ここがずれると盤面が格子表示に落ちる。 */
+  {
+    const ng = C.BUILTIN_PROFILES.filter(p=>{
+      const st = C.parseKeymap(C.makeDefaultKeymap(p));
+      return st.error || !st.layers.every(l=>l.bindings.length===p.keyCount);
+    }).map(p=>p.id);
+    t('全プリセットでキー数が盤面と一致する', ng.length===0, ng.join(','));
+  }
+  t('特別扱いする機種は無い', !ui.includes('AUTHOR_KEYMAPS') && !scripts[0][1].includes('AUTHOR_KEYMAPS'));
+  t('行構成が無ければ空のまま', C.makeDefaultKeymap({id:'x', keyCount:5, rows:[]}) === C.makeEmptyKeymap(5));
+
+  // 最下段: Ctrl は CapsLock の位置に置くので、ここには入れない
+  {
+    const ng = C.BUILTIN_PROFILES.filter(p=>{
+      const roles = C.rowRoles(p.rows);
+      const last = p.rows[p.rows.length-1];
+      if(roles[roles.length-1] !== -1 || last[1] < last[2]) return false;   // 分割は対象外
+      const b = C.parseKeymap(C.makeDefaultKeymap(p)).layers[0].bindings.slice(last[0], last[0]+last[2]);
+      return b.some(x=>/CTRL/.test(x));
+    }).map(p=>p.id);
+    t('最下段にCtrlを置かない', ng.length===0, ng.join(','));
+  }
+  t('広いキーはスペースにする', (()=>{
+    const p = C.builtinProfile('lily58');
+    const last = p.rows[p.rows.length-1];
+    const b = C.parseKeymap(C.makeDefaultKeymap(p)).layers[0].bindings.slice(last[0], last[0]+last[2]);
+    const wide = p.keys.slice(last[0], last[0]+last[2]).map(k=>k[0]);
+    return wide.every((w,i)=> w<200 || b[i]==='&kp SPACE');
+  })());
+  t('スペースを並べすぎない', (()=>{
+    const p = C.builtinProfile('ortho4x12');
+    const last = p.rows[p.rows.length-1];
+    const b = C.parseKeymap(C.makeDefaultKeymap(p)).layers[0].bindings.slice(last[0], last[0]+last[2]);
+    return b.filter(x=>x==='&kp SPACE').length <= 3;
+  })());
+
+  /* 枠が5個に満たない段では、外側(小指側)から落とす。
+     おさかな(32キー)は上下段が4+4しかないので、ここが要になる。 */
+  {
+    const p = C.builtinProfile('fish');
+    const st = C.parseKeymap(C.makeDefaultKeymap(p));
+    const row = i => st.layers[0].bindings.slice(p.rows[i][0], p.rows[i][0]+p.rows[i][2])
+      .map(b=>b.replace('&kp ',''));
+    t('上段は内側の8文字', row(0).join(' ')==='W E R T Y U I O', row(0).join(' '));
+    t('中段は10文字ぶん入る', row(1).join(' ').includes('A S D F G H J K L'), row(1).join(' '));
+    t('下段も内側の8文字', row(2).join(' ')==='X C V B N M COMMA DOT', row(2).join(' '));
+    // 数字などは前から詰め、足りない分は後ろが溢れる
+    const num = st.layers[1].bindings.slice(p.rows[0][0], p.rows[0][0]+p.rows[0][2]).map(b=>b.replace('&kp ',''));
+    t('数字は前から詰める', num.join(' ')==='N1 N2 N3 N4 N5 N6 N7 N8', num.join(' '));
+  }
+
+  // 最下段の組み立てそのもの
+  {
+    // 幅を渡すと、広いキーの位置がスペースになる(端にあっても)
+    const w = [100,100,100,100,600];          // 右端が広い
+    const r = C.bottomRow(5, 5, 2, w);
+    t('広いキーの位置がスペースになる', r[4]==='SPACE', r.join(' '));
+    t('その左は修飾で埋まる', r.slice(0,4).every(x=>x!=='SPACE'), r.join(' '));
+    t('幅を渡さないと中央を埋める', C.bottomRow(5, 5, 2)[2]==='SPACE', C.bottomRow(5,5,2).join(' '));
+
+    // 分割の親指段は、左右の枠に合わせて詰める
+    const b6 = C.bottomRow(9, 6, 3);
+    t('左半分が枠ぴったりになる', b6.length===9 && b6[5]==='SPACE', b6.join(' '));
+    t('右半分は右の枠から始まる', b6[6]==='RET', b6.join(' '));
+    t('余りは透過にする', b6[0]==='&trans', b6.join(' '));
+  }
+
+  // 矢印は逆T字。Fキー・Bluetoothと枠を取り合わない
+  {
+    const ng = [];
+    C.BUILTIN_PROFILES.forEach(p=>{
+      const st = C.parseKeymap(C.makeDefaultKeymap(p));
+      const fn = st.layers[st.layers.length-1].bindings;
+      const pos = C.corePositions(p);
+      const roles = C.rowRoles(p.rows);
+      const at = (role,i)=> pos[role] && fn[pos[role][i]];
+      if(at(1,7) !== '&kp UP') ng.push(p.id+':上');
+      if(at(2,6) !== '&kp LEFT' || at(2,7) !== '&kp DOWN' || at(2,8) !== '&kp RIGHT') ng.push(p.id+':左下右');
+      const nf = fn.filter(b=>/^&kp F\d+$/.test(b)).length;
+      const slots = (pos[roles.includes(0)? 0 : 3]||[]).filter(x=>x!==undefined).length;
+      if(nf !== Math.min(10, slots)) ng.push(p.id+':Fキー'+nf+'/'+slots);
+      if(fn.filter(b=>/^&bt BT_SEL/.test(b)).length !== 5) ng.push(p.id+':BT');
+    });
+    t('矢印は逆T字で、他と重ならない', ng.length===0, ng.join(' '));
+  }
+
+  // 書き出しても壊れない
+  {
+    const p = C.builtinProfile('corne6');
+    const st = C.parseKeymap(C.makeDefaultKeymap(p));
+    st.originalText = C.makeDefaultKeymap(p);
+    st.combos=[]; st.behaviors={morphs:[],tds:[],raws:[],hts:[]}; st.condLayers=[]; st.links=[];
+    const out = C.generateKeymap(st);
+    t('書き出しても読み直せる', C.parseKeymap(out).layers.length === st.layers.length);
+    t('未定義のビヘイビアが無い',
+      C.runValidation(Object.assign({macros:{items:[],raws:[]}, trackball:null}, st), ['win'])
+        .filter(x=>/未定義|存在しない/.test(x)).length === 0);
+  }
+
+  // 新規作成が初期キーマップを使う
+  t('新規作成で使われる', ui.includes('freshState(makeDefaultKeymap(p))'));
+  t('何が入るか先に伝える', ui.includes('標準的な配置が入った状態で始まります'));
+  t('エクスポートを促す一文は消えている', !html.includes('必要なら先に ☰メニュー'));
+  t('「作者の配置」という言い方をしない', !html.includes('作者の配置'));
+}
+
+section('リンクの格子表示(列の割り当て)');
+{
+  /* リンクしたレイヤーを縦にそろえるため、各利用環境の行で列位置を決める。
+     ここが崩れると、破線がつながらず「対応している」ことが見えなくなる。 */
+  const groups = [{name:'A',count:3},{name:'B',count:2}];
+  // A0=B0, A2=B1 をリンク → A1 は列を1つ食う
+  const {col, cols} = C.linkColumns([[0,3],[2,4]], groups, 5);
+  t('リンクした2枚は同じ列', col[0]===col[3], `${col[0]} / ${col[3]}`);
+  t('もう一方のリンクも同じ列', col[2]===col[4], `${col[2]} / ${col[4]}`);
+  t('リンクしていないレイヤーは別の列', col[1]!==col[0] && col[1]!==col[2], JSON.stringify(col));
+  t('行ごとに列が単調に増える', col[0] < col[1] && col[1] < col[2], JSON.stringify(col));
+  t('列数が足りている', cols >= 3, String(cols));
+
+  // リンクが無ければ、ただ順番に並ぶ
+  {
+    const r = C.linkColumns([], groups, 5);
+    t('リンクなしなら詰めて並ぶ', r.col[0]===0 && r.col[1]===1 && r.col[2]===2 && r.col[3]===0,
+      JSON.stringify(r.col));
+  }
+  // 交差するリンク(順序が食い違う)でも止まらない
+  {
+    const r = C.linkColumns([[0,4],[2,3]], groups, 5);
+    t('交差しても止まらない', typeof r.cols==='number' && r.cols>0, JSON.stringify(r));
+    t('全レイヤーに列が付く', [0,1,2,3,4].every(i=>r.col[i]!==undefined), JSON.stringify(r.col));
+  }
+
+  /* 並べ替えで順序が食い違ったときに、画面が階段状に崩れた不具合の再発防止。
+     3利用環境 × 3レイヤー。1つの環境だけ base を末尾へ動かした状態。
+     base はどうやってもそろわないが、num と fn はそろうはず。 */
+  {
+    const g3 = [{name:'A',count:3},{name:'B',count:3},{name:'C',count:3}];
+    //  A: base num fn / B: num fn base / C: base num fn
+    const links = [[0,5,6],[1,3,7],[2,4,8]];   // base / num / fn
+    const r = C.linkColumns(links, g3, 9);
+    t('そろえられるリンクはそろう', r.col[1]===r.col[3] && r.col[3]===r.col[7],
+      `num: ${r.col[1]}/${r.col[3]}/${r.col[7]}`);
+    t('もう一方もそろう', r.col[2]===r.col[4] && r.col[4]===r.col[8],
+      `fn: ${r.col[2]}/${r.col[4]}/${r.col[8]}`);
+    t('無理な1本だけがずれる', r.col[0]===r.col[6] && r.col[5]!==r.col[0],
+      `base: ${r.col[0]}/${r.col[5]}/${r.col[6]}`);
+    t('列が増えすぎない', r.cols <= 4, String(r.cols));
+    // 各行の中では、必ず左から右へ並ぶ
+    [[0,1,2],[3,4,5],[6,7,8]].forEach((row,ri)=>{
+      t('行'+ri+'は左から右へ並ぶ', r.col[row[0]] < r.col[row[1]] && r.col[row[1]] < r.col[row[2]],
+        row.map(i=>r.col[i]).join(','));
+    });
+  }
+  // 2つの環境が同じように食い違っていても、そろうものはそろう
+  {
+    const g3 = [{name:'A',count:3},{name:'B',count:3},{name:'C',count:3}];
+    const r = C.linkColumns([[0,5,8],[1,3,6],[2,4,7]], g3, 9);
+    t('2環境がずれてもそろう', r.col[1]===r.col[3] && r.col[3]===r.col[6], JSON.stringify(r.col));
+    t('ずれる側は同じ列に入る', r.col[5]===r.col[8], `${r.col[5]}/${r.col[8]}`);
+    t('列数は最小限', r.cols === 4, String(r.cols));
+  }
+}
+
+section('差異の判定と記憶');
+{
+  /* 画面を描き直すたびに全リンクを変換し直すと重い。
+     内容が変わっていなければ前回の結果を返す。 */
+  const mk = (n,keys) => Array.from({length:n},(_,i)=>({name:'L'+i, displayName:null,
+    bindings:Array(keys).fill('&kp A'), sensor:null, shiftLayer:false}));
+  const st = {layers: mk(4, 20),
+    groups:[{name:'A',count:2,locale:'us',platform:'win'},{name:'B',count:2,locale:'us',platform:'win'}],
+    links:[[0,2]], combos:[], behaviors:{morphs:[],tds:[],raws:[],hts:[]}, condLayers:[]};
+  // 配列の違いが効くように、記号キーを1つ置いておく
+  st.layers[0].bindings[5] = '&kp AT_SIGN';
+  st.layers[2].bindings[5] = '&kp AT_SIGN';
+
+  t('同じなら差異なし', C.linksWithDiffs(st).length===0);
+  st.layers[2].bindings[3] = '&kp Z';
+  t('変えると差異あり', JSON.stringify(C.linksWithDiffs(st))==='[0]', JSON.stringify(C.linksWithDiffs(st)));
+  st.layers[2].bindings[3] = '&kp A';
+  t('戻すと差異なし', C.linksWithDiffs(st).length===0);
+
+  // 記憶の鍵は「差異の有無を左右するもの」だけを見る
+  {
+    const sig = C.linksSignature(st);
+    st.layers[0].name = '名前を変えただけ';
+    t('名前を変えても鍵は同じ', C.linksSignature(st)===sig);
+    st.groups[1].locale = 'jis';
+    t('配列を変えると鍵が変わる', C.linksSignature(st)!==sig);
+    t('配列が違えば差異あり', C.linksWithDiffs(st).length===1, JSON.stringify(C.linksWithDiffs(st)));
+    st.groups[1].locale = 'us';
+  }
+  {
+    const sig = C.linksSignature(st);
+    st.layers[0].shiftLayer = true;
+    t('Shift入力を変えると鍵が変わる', C.linksSignature(st)!==sig);
+    st.layers[0].shiftLayer = false;
+  }
+  t('リンクが無ければ鍵は空', C.linksSignature({layers:[], groups:[], links:[]})==='');
+
+  // 1件見つけたら打ち切る(全部の差分を作らない)
+  {
+    const fn = scripts[0][1].slice(scripts[0][1].indexOf('function linkHasDiffs('));
+    const body = fn.slice(0, fn.indexOf('\n}'));
+    t('差異は1件見つけたら打ち切る', body.includes('return true;') && !body.includes('computeLinkSync'), body.length+'字');
+  }
+}
+
+section('自動生成した mod-morph の扱い');
+{
+  /* 変換で作る morph は loc_<元>_<先>_<キー>。名前から素性がたどれるので、
+     表示の配列も、再変換も、掃除も、名前だけで判断できる。 */
+  t('先の配列で読む', C.morphFaceLocale('loc_us_jis_sqt')==='jis' && C.morphFaceLocale('loc_jis_us_lbkt')==='us');
+  t('別の配列でも読める', C.morphFaceLocale('loc_us_de_sqt')==='de');
+  t('古い名前も読める', C.morphFaceLocale('jis_sqt')==='jis');
+  t('手作りのものは既定でUS', C.morphFaceLocale('my_morph')==='us');
+  t('生成物かどうか判る',
+    C.isGeneratedMorph('loc_us_jis_sqt') && C.isGeneratedMorph('jis_sqt') && !C.isGeneratedMorph('my_morph'));
+  t('画面でも先の配列で読む', ui.includes('const ly = morphFaceLocale(m.name);'),
+    String((ui.match(/morphFaceLocale\(m\.name\)/g)||[]).length));
+
+  // 掃除は「生成したもので、どこからも呼ばれていないもの」だけ
+  {
+    const rm = ui.slice(ui.indexOf('function pruneGeneratedMorphs('));
+    const body = rm.slice(0, rm.indexOf('\n}'));
+    t('レイヤー以外も見て使用中を判定',
+      ['state.layers','state.combos','tds','hts','macros'].every(k=>body.includes(k)), body.length+'字');
+    t('手作りのmorphは消さない', body.includes('!isGeneratedMorph(m.name) || used.has(m.name)'));
+  }
+  t('JIS専用の表は残っていない',
+    !ui.includes('JIS_MORPHS') && !ui.includes('MORPH_BY_NAME') && !ui.includes('collectMorphs'));
+}
+
+section('保存キーと旧データの後始末');
+{
+  /* 保存キーは roBa 専用だった頃の名残(roba_*)を引きずっていた。
+     いま使うのは zmm_* だけ。旧データ向けの分岐も残さない。 */
+  const keys = [...new Set([...ui.matchAll(/localStorage\.\w+\('([\w:.-]+)'/g)].map(m=>m[1]))];
+  t('保存キーは zmm_ で揃っている',
+    keys.filter(k=>!/^zmm_/.test(k)).length <= 1, keys.join(' '));
+  t('旧キーは読み出しの1箇所だけ',
+    (ui.match(/'roba_[\w]+'/g)||[]).length <= 3, (ui.match(/'roba_[\w]+'/g)||[]).join(' '));
+  t('12レイヤー前提の分岐が無い',
+    !ui.includes("state.layers.length===12") && !ui.includes("_JIS$"));
+  t('13→12の移行処理が無い', !ui.includes('migrate13to12'));
+  t('旧US⇄JIS専用エンジンが無い',
+    ['convKeycode','mapLayer','convertAllToJis','buildJisMaps','convBindingUs','REV_JIS','SYM_EXPAND']
+      .every(n=>!ui.includes(n)));
+}
+
+section('利用環境の名前(自由な文字)');
+{
+  /* 画面に出す名前は自由(職場・自宅など)。ファイルに書く接頭辞は
+     devicetree が通る文字だけで別に作り、名前はコメント1行で戻す。 */
+  const gs = [{name:'職場',count:2},{name:'自宅のMac',count:1},{name:'WIN',count:1}];
+  t('日本語だけならENV番号', C.envSlug(gs,0)==='ENV1', C.envSlug(gs,0));
+  t('英数字が混ざれば拾う', C.envSlug(gs,1)==='MAC', C.envSlug(gs,1));
+  t('英字はそのまま', C.envSlug(gs,2)==='WIN', C.envSlug(gs,2));
+  t('接頭辞は重ならない', (()=>{
+    const g2=[{name:'Mac',count:1},{name:'MAC',count:1},{name:'mac',count:1}];
+    const all=[0,1,2].map(i=>C.envSlug(g2,i));
+    return new Set(all).size===3; })(), [0,1,2].map(i=>C.envSlug([{name:'Mac'},{name:'MAC'},{name:'mac'}],i)).join(','));
+  t('数字始まりは避ける', C.envSlug([{name:'2台目',count:1}],0)==='ENV1');
+  t('接頭辞はdevicetreeが通る文字だけ',
+    [gs,[{name:'職場'}],[{name:'自宅 の Mac!'}]].every(g=>g.every((_,i)=>/^[A-Za-z][A-Za-z0-9_]*$/.test(C.envSlug(g,i)))));
+
+  t('レイヤー名も自由', C.layerSlug('ベース', 3)==='layer3' && C.layerSlug('base_layer', 0)==='base_layer');
+  t('数字始まりのレイヤー名も逃がす', C.layerSlug('1st', 5)==='layer5');
+
+  // ノード名は接頭辞から作る
+  {
+    const st = {groups:gs, layers:[{name:'ベース'},{name:'記号'},{name:'base'},{name:'x'}]};
+    t('ノード名に日本語が入らない',
+      [0,1,2,3].every(i=>/^[A-Za-z][A-Za-z0-9_]*$/.test(C.nodeNameFor(st,i))),
+      [0,1,2,3].map(i=>C.nodeNameFor(st,i)).join(' '));
+    t('ノード名は環境ごとに連番', C.nodeNameFor(st,0)==='ENV1_01_layer0' && C.nodeNameFor(st,1)==='ENV1_02_layer1',
+      C.nodeNameFor(st,0)+' / '+C.nodeNameFor(st,1));
+  }
+
+  // コメントで名前が戻る
+  {
+    const st = {groups:[{name:'職場',count:1},{name:'WIN',count:1}], layers:[{name:'a'},{name:'b'}]};
+    const line = C.envComment(st);
+    t('戻せない名前だけ書く', line.includes('ENV1=職場') && !line.includes('WIN='), line.trim());
+    const g2 = [{name:'ENV1',count:1},{name:'WIN',count:1}];
+    t('コメントから戻せる', C.applyEnvNames(line, g2)===1 && g2[0].name==='職場', g2.map(g=>g.name).join(','));
+    t('全部そのまま書けるなら書かない',
+      C.envComment({groups:[{name:'WIN',count:1}], layers:[{name:'a'}]})==='');
+    t('コメントが無ければ何もしない', C.applyEnvNames('keymap { }', g2)===0);
+    t('壊れた行でも落ちない', (()=>{ try{ C.applyEnvNames('// zmk-env: =;;a', g2); return true; }catch(e){ return false; } })());
+  }
+
+  // 実際に書き出して読み直す
+  {
+    const raw = C.DEFAULT_KEYMAP;
+    const st = C.parseKeymap(raw); st.originalText = raw;
+    st.combos=[]; st.behaviors={morphs:[],tds:[],raws:[],hts:[]}; st.macros={items:[],raws:[]};
+    st.condLayers=[]; st.trackball=null; st.links=[];
+    st.layers = st.layers.slice(0,2);
+    st.layers[0].name = 'ベース'; st.layers[1].name = '記号';
+    st.groups = [{name:'職場', count:2, locale:'jis', platform:'win'}];
+    const out = C.generateKeymap(st);
+    t('書き出しは devicetree として妥当',
+      !/[ぁ-んァ-ヶ一-龥]/.test((out.match(/^\s*\w[\w-]*\s*\{/gm)||[]).join(' ')), 'ノード名');
+    t('名前はコメントとdisplay-nameに残る',
+      out.includes('// zmk-env: ENV1=職場') && out.includes('display-name = "ベース"'),
+      out.split('\n').filter(x=>x.includes('zmk-env')||x.includes('display-name')).join(' | '));
+    const back = C.parseKeymap(out);
+    t('読み直せる', !back.error, back.error);
+  }
+}
+
+section('切り替えキーの規約');
+{
+  /* 「利用環境の先頭レイヤーへ &to する」ものを切り替えキーと見なす。
+     マクロ経由(env_* など)も同じ扱いにする。 */
+  const mk = n => Array.from({length:n},(_,i)=>({name:'L'+i, displayName:null,
+    bindings:Array(10).fill('&trans'), sensor:null, shiftLayer:false}));
+  const st = {layers: mk(4), groups:[{name:'WIN',count:2},{name:'MAC',count:2}],
+    macros:{items:[{name:'env_mac', steps:[{type:'tap', binding:'&to 2'}]}], raws:[]}};
+
+  t('先頭レイヤーへの &to は切り替えキー', C.switchTargetOf(st, '&to 2') === 1);
+  t('先頭でないレイヤーへの &to は違う', C.switchTargetOf(st, '&to 3') === -1);
+  t('&mo は切り替えキーではない', C.switchTargetOf(st, '&mo 2') === -1);
+  t('ふつうのキーも違う', C.switchTargetOf(st, '&kp A') === -1);
+  t('マクロ経由でも見つける', C.switchTargetOf(st, '&env_mac') === 1);
+  t('利用環境が1つなら常に -1',
+    C.switchTargetOf({layers:mk(2), groups:[{name:'MAIN',count:2}]}, '&to 0') === -1);
+
+  st.layers[0].bindings[3] = '&to 2';
+  st.layers[1].bindings[4] = '&env_mac';
+  const keys = C.findSwitchKeys(st);
+  t('盤面から拾える', keys.length === 2, JSON.stringify(keys));
+  t('位置と行き先が分かる', keys[0].li===0 && keys[0].pos===3 && keys[0].gi===1, JSON.stringify(keys[0]));
+  t('マクロ経由の印が付く', keys[1].bt === true && keys[0].bt === false);
+
+  // どこからも行けない利用環境を知らせる(切り替えキーの置き忘れ)
+  t('行けない利用環境が無い', C.findUnreachableEnvs(st).length === 0);
+  const st2 = {layers: mk(4), groups:[{name:'WIN',count:2},{name:'MAC',count:2}], macros:{items:[],raws:[]}};
+  t('置き忘れを検出する', JSON.stringify(C.findUnreachableEnvs(st2)) === '[1]',
+    JSON.stringify(C.findUnreachableEnvs(st2)));
+  t('先頭の利用環境は対象外(電源投入時の既定)',
+    !C.findUnreachableEnvs(st2).includes(0));
+}
+
+section('設定の書き戻し(往復)');
+{
+  /* パースだけでなく、書き戻して読み直しても同じになることを見る。
+     ここが崩れると「保存したのに反映されない」という一番困る壊れ方をする。 */
+  const base = '#include <behaviors.dtsi>\n/ {\n    behaviors {\n    };\n    macros {\n    };\n'
+    + '    conditional_layers {\n    };\n    keymap {\n        compatible = "zmk,keymap";\n'
+    + '        default_layer { bindings = <&kp A>; };\n    };\n};\n';
+
+  // Hold-Tap / Sticky の全体調整
+  {
+    let out = C.patchHoldtapOne(base, 'mt', {tapping:180, quickTap:150, flavor:'balanced', holdTrigger:true});
+    const got = C.parseHoldtapOne(out, 'mt');
+    // 時間は数値で持つ(読み込みと書き込みで型を揃えてある)
+    t('mt の設定が往復する',
+      got && got.tapping===180 && got.quickTap===150 && got.flavor==='balanced', JSON.stringify(got));
+    t('時間は数値で返る', typeof got.tapping === 'number', typeof got.tapping);
+    out = C.patchStickyOne(out, 'sk', {releaseAfter:900, quickRelease:true});
+    const gs = C.parseStickyOne(out, 'sk');
+    t('sk の設定が往復する', gs && gs.releaseAfter===900 && gs.quickRelease===true, JSON.stringify(gs));
+    t('設定なしは null', C.parseHoldtapOne('/ { };','mt').tapping===undefined
+      || C.parseHoldtapOne('&mt { };','mt').tapping===null,
+      JSON.stringify(C.parseHoldtapOne('&mt { };','mt')));
+    t('元のノードを壊していない', C.parseKeymap(out).layers.length === 1);
+  }
+
+  // マクロ
+  {
+    const macros = {items:[{name:'my_macro', waitMs:30, tapMs:20,
+      steps:[{type:'tap', binding:'&kp A'}, {type:'wait', ms:50}, {type:'press', binding:'&kp LSHFT'}]}], raws:[]};
+    const inner = C.genMacrosInner(macros);
+    const text = '/ {\n    macros {'+inner+'};\n};\n';
+    const back = C.parseMacros(text);
+    t('マクロが往復する', back.items.length===1 && back.items[0].name==='my_macro', JSON.stringify(back.items[0]||{}));
+    t('ステップも往復する',
+      back.items[0] && back.items[0].steps.length===3 && back.items[0].steps[1].type==='wait'
+      && back.items[0].steps[1].ms===50, JSON.stringify(back.items[0]&&back.items[0].steps));
+    t('待ち時間と打鍵間隔も残る', back.items[0] && back.items[0].waitMs===30 && back.items[0].tapMs===20);
+  }
+
+  // 条件付きレイヤー
+  {
+    const cls = [{name:'tri', ifLayers:[1,2], thenLayer:3}];
+    const text = '/ {\n    conditional_layers {'+C.genCondLayersInner(cls)+'};\n};\n';
+    const back = C.parseCondLayers(text);
+    t('条件付きレイヤーが往復する',
+      back.length===1 && back[0].thenLayer===3 && back[0].ifLayers.join(',')==='1,2',
+      JSON.stringify(back));
+  }
+
+  // トラックボール
+  {
+    const tb = {automouseLayer:2, scrollLayers:[3], snipeLayers:[4], autoTimeout:600,
+      cpi:600, cpiDiv:4, snipeCpi:200, snipeCpiDiv:4, scrollTick:20, invertX:true, invertY:false, rotate:30};
+    const patched = C.patchTrackball(base, tb);
+    const back = C.parseTrackball(patched);
+    t('トラックボールの連携が往復する',
+      back && back.automouseLayer===2 && (back.scrollLayers||[]).join(',')==='3',
+      JSON.stringify(back||{}));
+    const conf = C.genConf(tb);
+    t('conf に必要な行が出る',
+      /CONFIG_PMW3610_CPI=600/.test(conf) && /CONFIG_PMW3610_SNIPE_CPI=200/.test(conf), conf.split('\n')[1]);
+    t('conf に見出しが付く', conf.split('\n')[0].startsWith('#'));
+  }
+}
+
+section('利用環境の入れ替え(permuteGroups)');
+{
+  const mk = n => Array.from({length:n},(_,i)=>({name:'L'+i, displayName:null,
+    bindings:['&mo '+((i+1)%n), '&kp A'], sensor:null, shiftLayer:false}));
+  const st = {layers: mk(4), groups:[{name:'A',count:2},{name:'B',count:2}],
+    combos:[], behaviors:{morphs:[],tds:[],raws:[],hts:[]}, condLayers:[], links:[[0,2]]};
+  const perm = C.permuteGroups(st, 0, 1);
+  t('利用環境が入れ替わる', st.groups.map(g=>g.name).join(',')==='B,A', st.groups.map(g=>g.name).join(','));
+  t('レイヤーも一緒に動く', st.layers.map(l=>l.name).join(',')==='L2,L3,L0,L1', st.layers.map(l=>l.name).join(','));
+  t('対応表が返る', perm[0]===2 && perm[2]===0, JSON.stringify(perm));
+}
+
+section('英語表示');
+{
+  /* 静的なラベルは辞書、ヘルプ本文などまとまった文はブロックごと差し替える。
+     組み立て文(「&kp A (pos 3)\n説明」など)は、辞書にある言い回しを当てる。 */
+  t('辞書の件数', Object.keys(C.I18N_EN).length >= 480, String(Object.keys(C.I18N_EN).length));
+  t('組み立て文にも当てる', scripts[0][1].includes('const I18N_PHRASES'));
+  t('当てるのは3文字以上', /I18N_PHRASES[\s\S]{0,120}k\.length>=3/.test(scripts[0][1]));
+  t('長いものから順に当てる', /I18N_PHRASES[\s\S]{0,200}sort\(\(a,b\)=>b\.length-a\.length\)/.test(scripts[0][1]));
+  t('まとまりごと差し替える箇所がある',
+    ui.includes("'exp-body':") && ui.includes("'lk-shift-note':") && html.includes('id="exp-body"'));
+  t('日本語のまま出す道が残っている', /if\(!I18N_JA\.test\(raw\)\) return raw;/.test(scripts[0][1]));
+
+  // 内蔵キーボードや配列の名前は、言語に依存しない表記にした
+  t('キーボード名と補足に英訳がある',
+    C.BUILTIN_PROFILES.every(p=>
+      (!/[ぁ-んァ-ヶ一-龥]/.test(p.name) || C.I18N_EN[p.name]) &&
+      (!p.note || !/[ぁ-んァ-ヶ一-龥]/.test(p.note) || C.I18N_EN[p.note])),
+    C.BUILTIN_PROFILES.filter(p=>/[ぁ-んァ-ヶ一-龥]/.test(p.name) && !C.I18N_EN[p.name]).map(p=>p.name).join(','));
+  t('配列名に日本語が無い',
+    C.LOCALE_LIST.every(l=>!/[ぁ-んァ-ヶ一-龥]/.test(l.name)),
+    C.LOCALE_LIST.map(l=>l.name).join(','));
+
+  // 実際に訳せるか(操作の結果として出る文章)
+  {
+    const en = s => {
+      const m = ui.slice(ui.indexOf('const MSG_EN = {'));
+      return m.includes(s);
+    };
+    t('よく出る文章が辞書にある',
+      ['最後のレイヤーは削除できません','保存について','JSONに書き出す'].every(en));
+  }
+}
+
+section('メニューの見た目と表記');
+{
+  // 表示言語を変えてもメニューの高さが変わらないこと(項目は必ず1行)
+  const css = html.slice(html.indexOf('<style>'), html.indexOf('</style>'));
+  const rule = css.slice(css.indexOf('.menu button{'), css.indexOf('}', css.indexOf('.menu button{')));
+  t('メニュー項目は1行に固定', /height:34px/.test(rule) && /white-space:nowrap/.test(rule), rule);
+  t('はみ出しても折り返さない', /text-overflow:ellipsis/.test(rule));
+  const lab = css.slice(css.indexOf('.mlabel{'), css.indexOf('}', css.indexOf('.mlabel{')));
+  t('節見出しも高さ固定', /height:22px/.test(lab) && /white-space:nowrap/.test(lab), lab);
+
+  // メニューの文言はすべて英訳がある(訳が無いと日本語のまま混ざる)
+  {
+    const menu = html.slice(html.indexOf('<div id="hmenu"'), html.indexOf('</div>', html.indexOf('btn-reset')));
+    const labels = [...menu.matchAll(/>([^<>]+)<\/button>/g)].map(m=>m[1].trim());
+    const secs = [...menu.matchAll(/class="mlabel">([^<]+)</g)].map(m=>m[1].trim());
+    const miss = labels.concat(secs).filter(x=>!/^Language/.test(x) && !C.I18N_EN[x]);
+    t('メニューの文言に英訳がある', miss.length === 0, miss.join(' / '));
+  }
+
+  // 名前の変更
+  t('「お知らせログ」に統一', html.includes('お知らせログ') && !html.includes('これまでのお知らせ'));
+  t('「キー出力の同期」に統一', html.includes('キー出力の同期') && !html.includes('>キーの同期<'));
+  t('英訳もある', C.I18N_EN['キー出力の同期'] === 'Key output sync' && !!C.I18N_EN['お知らせログ']);
+}
+
+section('お知らせの出し方');
+{
+  // 出しっぱなしにしない。ただし消えたものも読み返せる
+  t('お知らせは1本の入口から出す',
+    ui.includes('function say(') && !ui.includes("getElementById('warnings').innerHTML = msgText"));
+  t('時間が経つと消える', /function say\([\s\S]{0,700}setTimeout\([\s\S]{0,80}innerHTML = ''/.test(ui));
+  t('長い文ほど長く出す', /Math\.min\(20000, Math\.max\(6000/.test(ui));
+  t('履歴は20件まで', ui.includes('MSG_LOG_MAX = 20') && /MSG_LOG\.length > MSG_LOG_MAX/.test(ui));
+  t('新しいものが先頭', ui.includes('MSG_LOG.unshift('));
+  t('履歴の入口が2つある',
+    html.includes('id="btn-msghist"') && /getElementById\('warnings'\)\.onclick/.test(ui));
+  t('履歴の画面がある', html.includes('id="msglog-bg"') && html.includes('id="msglog-list"'));
+  t('履歴でも色分けされる', /renderMsgLog[\s\S]{0,600}msgText\(m\.text, m\.kind\)/.test(ui));
+
+  // Ctrl+S: 保存しようとした人にだけ、必要なタイミングで伝える
+  t('Ctrl+Sを拾う', /key\.toLowerCase\(\)==='s'[\s\S]{0,120}preventDefault/.test(ui));
+  t('自動保存されていることを伝える', /key\.toLowerCase\(\)==='s'[\s\S]{0,400}自動で保存されています/.test(ui));
+  t('書き出しにつなげられる', /key\.toLowerCase\(\)==='s'[\s\S]{0,600}btn-backup/.test(ui));
+  t('フッターから自動保存の説明が消えている',
+    !html.includes('編集内容はブラウザに自動保存'));
+}
+
+section('配色と書体');
+{
+  /* 参考にした方針(デジタル庁): 白地・高コントラスト・余白多め・平らな面。
+     見た目の好みではなく「読めるか」を機械で確かめる。 */
+  const css = html.slice(html.indexOf('<style>'), html.indexOf('</style>'));
+  const pal = sel => {
+    const i = css.indexOf(sel);
+    if (i < 0) return null;
+    const body = css.slice(i, css.indexOf('}', i));
+    const out = {};
+    [...body.matchAll(/--([\w-]+):(#[0-9a-fA-F]{6})/g)].forEach(m => { out[m[1]] = m[2]; });
+    return out;
+  };
+  const lum = h => {
+    const c = [1, 3, 5].map(i => parseInt(h.slice(i, i + 2), 16) / 255)
+      .map(x => x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4));
+    return 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+  };
+  const ratio = (a, b) => {
+    const [l1, l2] = [lum(a), lum(b)].sort((x, y) => y - x);
+    return (l1 + 0.05) / (l2 + 0.05);
+  };
+  const light = pal(':root, [data-theme="light"]{');
+  const dark = pal('[data-theme="dark"]{');
+  t('ライトとダークの2つのパレットがある', !!light && !!dark);
+  t('既定はライト', ui.includes("let themeMode = 'light'"));
+
+  // 文字が背景に対して読めること(WCAG AA = 4.5:1)
+  const pairs = [['text','bg'],['text','panel2'],['text','key'],['dim','bg'],['dim','panel2'],
+    ['accent','bg'],['accent','panel2'],['onaccent','accent'],['danger','panel2'],
+    ['accent2','panel2'],['warn','warnbg'],['morph','panel2'],['jis','panel2'],['hold','panel2']];
+  [['ライト', light], ['ダーク', dark]].forEach(([name, P]) => {
+    if (!P) return;
+    const bad = pairs.filter(([a, b]) => P[a] && P[b] && ratio(P[a], P[b]) < 4.5)
+      .map(([a, b]) => `${a}/${b}=${ratio(P[a], P[b]).toFixed(2)}`);
+    t(name + 'の配色がAA(4.5:1)を満たす', bad.length === 0, bad.join(' '));
+  });
+
+  // 平らな面: 大きな角丸と飾りの影をやめた
+  t('角丸は変数で一本化', css.includes('--radius:') && css.includes('--radius-lg:'));
+  t('大きな角丸が残っていない', !/border-radius:(?:8|10|12|14|16)px/.test(css),
+    (css.match(/border-radius:\d+px/g) || []).join(' '));
+  {
+    // 影は「浮かせる飾り」ではなく、輪郭を補う程度にとどめる
+    const shadows = [...new Set(css.match(/box-shadow:[^;}]+/g) || [])];
+    const heavy = shadows.filter(x => {
+      const m = x.match(/rgba\(0,0,0,\.(\d+)\)/);
+      return m && Number('0.' + m[1]) > 0.2;
+    });
+    t('濃い影が残っていない', heavy.length === 0, heavy.join(' | '));
+  }
+
+  // 書体: 日本語を先頭に置いたシステムスタック(外部から読み込まない)
+  t('日本語の書体を先に指定している', /font-family:"Noto Sans JP","Hiragino Sans"/.test(css));
+  t('等幅も指定している', css.includes('"SFMono-Regular","Consolas"'));
+  t('Webフォントを読み込んでいない',
+    !/@font-face|fonts\.googleapis|fonts\.gstatic/.test(html));
+}
+
+section('リンクと同期の分離');
+{
+  // 「対応付ける」と「揃える」は別の作業なので、画面も分けた
+  t('2つのボタンに分かれている',
+    html.includes('id="btn-links"') && html.includes('id="btn-sync"') && !html.includes('btn-platform'));
+  t('2つの画面に分かれている',
+    html.includes('id="links-bg"') && html.includes('id="sync-bg"') && !html.includes('plat-bg'));
+  t('同期画面の副題', /id="sync-bg"[\s\S]{0,600}リンク単位で入力を揃える/.test(html));
+  t('リンクの作成はリンク画面に', /id="links-bg"[\s\S]{0,1200}id="lk-create"/.test(html));
+  t('マスター選択は同期画面に', /id="sync-bg"[\s\S]{0,900}id="lk-master"/.test(html));
+  t('リンクが無いときの案内が両方にある',
+    html.includes('id="lk-nolink"') && html.includes('id="lk-nosync"'));
+
+  // Shift入力はレイヤー単位からリンク単位へ
+  t('レイヤー単位のトグルが無い',
+    !html.includes('btn-shiftlayer') && !ui.includes("getElementById('btn-shiftlayer')"));
+  t('リンク単位の関数がある',
+    ui.includes('function linkShiftState(') && ui.includes('function setLinkShift('));
+  t('リンクの全員に同じ値を書く',
+    /function setLinkShift[\s\S]{0,200}link\.forEach/.test(ui));
+  t('混在も表せる', ui.includes("'mix'") && ui.includes('混在'));
+  t('位置づけがヘルプに書いてある',
+    html.includes('Shift入力（リンクごとの設定）') && html.includes('入力を制限する設定ではありません'));
+
+  // 表示メニューは押しても閉じない
+  t('表示の切り替えでメニューを閉じない',
+    ui.includes('HMENU_KEEP_OPEN') && ['btn-lang','btn-theme','btn-lnum','btn-combo-ov']
+      .every(id=>new RegExp("HMENU_KEEP_OPEN[\\s\\S]{0,200}'"+id+"'").test(ui)));
+
+  // レイヤー節は複数環境のときだけ
+  t('レイヤー節に id が付いている', html.includes('id="trow-layer"'));
+  t('旧「利用環境間の同期」の表記が残っていない', !html.includes('利用環境間の同期'));
+}
+
+section('文言の整理');
+{
+  t('メニューはインポート/エクスポート',
+    /id="btn-import"[^>]*>インポート</.test(html) && /id="btn-backup"[^>]*>エクスポート</.test(html));
+  t('英訳もある', scripts[0][1].includes("'インポート':'Import'") && scripts[0][1].includes("'エクスポート':'Export'"));
+  t('書き出し先の名前は1箇所で決める',
+    ui.includes('function keymapFileName()') && (ui.match(/keymapFileName\(\)/g)||[]).length>=3);
+  t('roBa決め打ちの案内が残っていない', !html.includes('config/roBa.keymap'));
+  t('「roBa以外は非対応」の記述が消えている', !html.includes('roBa以外のキーボードへの対応'));
+  t('プレビューにも書き出し先を出す', html.includes('id="pv-path"') && ui.includes("'config/' + keymapFileName()"));
+}
+
+section('やり残しの仕上げ');
+{
+  // ① キーの回転(親指キーのような斜め配置)
+  {
+    const keys = [[100,100,0,0,0,0,0],[100,100,100,0,0,0,0]];
+    const r = C.rotateKeyAt(keys, 1, 15);
+    t('角度は centi-degree で持つ', r[1][4]===1500, String(r[1][4]));
+    t('中心は既定でキーの中央', r[1][5]===150 && r[1][6]===50, r[1].join(','));
+    t('元の配列は変えない', keys[1][4]===0);
+    t('中心を指定できる', C.rotateKeyAt(keys,1,15,100,0)[1][5]===100);
+    t('0で回転が消える', C.rotateKeyAt(r,1,0)[1].slice(4).join(',')==='0,0,0');
+    t('編集欄がある', ['kbe-r','kbe-rx','kbe-ry','kbe-rcenter'].every(id=>html.includes('id="'+id+'"')));
+    t('編集欄が反映される', ui.includes("['kbe-w','kbe-h','kbe-x','kbe-y','kbe-r','kbe-rx','kbe-ry']"));
+  }
+
+  // ② OS互換: 「未確認」を黙って通さない
+  {
+    // LANG1 は iOS が -1(未確認)、Android が 0(反応しない)
+    t('未確認を拾う', C.findOsUnknowns('&kp LANG1', ['ios']).length===1);
+    t('反応しないと分かっているものは別扱い',
+      C.findOsUnknowns('&kp LANG1', ['android']).length===0 && C.findOsIssues('&kp LANG1', ['android']).length===1);
+    t('確認済みのキーは出ない', C.findOsUnknowns('&kp A', ['ios']).length===0);
+    t('未確認の一覧を画面に出す', ui.includes('function osRenderUnknown'));
+    t('分からないと明記する', ui.includes('確認できていない'));
+  }
+
+  // ③ 動的メッセージの英訳
+  {
+    t('文章用の辞書がある', ui.includes('const MSG_EN') && ui.includes('const MSG_EN_RULES'));
+    t('文章を訳す入口が1本', ui.includes('function trText(') && ui.includes('function msgText('));
+    t('メッセージ枠は msgText を通る',
+      (ui.match(/msgHtml\(esc\(/g)||[]).length===1     // msgText の中の1回だけ
+      && ((ui.match(/msgText\(\(/g)||[]).length + (ui.match(/\bsay\(\(/g)||[]).length) >= 20);
+    t('ダイアログの文言も訳す', /ask-msg'\)\.textContent = trText/.test(ui));
+    t('訳が無ければ原文のまま', /return t;\n\}/.test(ui.slice(ui.indexOf('function trText('))));
+    t('訳しきれていないことをヘルプに書いてある', html.includes('About this translation'));
+  }
+}
+
+section('メッセージと自前ダイアログ');
+{
+  /* ブラウザ標準の alert/confirm/prompt は見た目が浮くうえ、
+     良い知らせと悪い知らせの区別も付かない。自前の1枚に集約した。 */
+  t('標準ダイアログが残っていない',
+    !/(?<![\w.])(alert|confirm|prompt)\s*\(/.test(ui),
+    (ui.match(/(?<![\w.])(alert|confirm|prompt)\s*\([^)]{0,40}/)||[''])[0]);
+  t('置き換え先が用意されている',
+    ui.includes('function notify(') && ui.includes('function uiConfirm(') && ui.includes('function uiPrompt('));
+  t('ダイアログのHTMLがある',
+    ['ask-bg','ask-head','ask-mark','ask-title','ask-msg','ask-input','ask-ok','ask-cancel']
+      .every(id=>html.includes('id="'+id+'"')));
+  t('EnterとEscで決められる',
+    /ask-bg[\s\S]{0,400}Enter[\s\S]{0,200}Escape/.test(ui));
+
+  // 色分け: 良い / 注意 / 悪い / ふつう
+  t('4種類のスタイルがある',
+    ['.warnbox.ok','.warnbox.warn','.warnbox.bad','.warnbox.info'].every(c=>html.includes(c)));
+  t('既定は中立の見た目', /\.warnbox\{[^}]*var\(--panel2\)/.test(html));
+  {
+    // 種別は先頭の記号から決まる
+    const kind = ui.slice(ui.indexOf('function msgKind('));
+    const body = kind.slice(0, kind.indexOf('\n}'));
+    t('✅ は良い知らせ', /'ok'/.test(body) && body.includes('✅'));
+    t('⚠ は注意', /'warn'/.test(body) && body.includes('⚠'));
+    t('エラーは悪い知らせ', /'bad'/.test(body) && body.includes('エラー'));
+    t('それ以外はふつう', /return 'info'/.test(body));
+  }
+  t('メッセージ枠は種別つきで作る',
+    ui.includes('function msgHtml(') && !/'<div class="warnbox">'\s*\+/.test(ui));
+  t('色をインラインstyleで塗っていない',
+    !ui.includes("style=\"border-color:var(--danger)\""));
+  t('通知の既定は「できません」の色', /function notify\(msg, kind\)\{[^}]*kind\|\|'bad'/.test(ui));
+  t('削除の確認は赤で出す',
+    (ui.match(/kind:'bad'/g)||[]).length >= 5, String((ui.match(/kind:'bad'/g)||[]).length));
 }
 
 section('画面部品の不変条件');
@@ -2231,6 +3441,44 @@ section('壊れた入力への耐性');
     return ok;
   })());
 
+  // 新しく足した経路も、変な入力で落ちないこと
+  {
+    const layers=[{name:'a',bindings:['&kp A']},{name:'b',bindings:['&kp B']}];
+    const groups=[{name:'G',count:2}];
+    ['', '// zmk-order:', '// zmk-order: a', '// zmk-order: a; a', '// zmk-order: x; y',
+     '// zmk-order: '+'a;'.repeat(50)].forEach(x=>{
+      let ok=true, r;
+      try{ r = C.parseOrder(x, layers, groups); }catch(e){ ok=false; }
+      t('zmk-orderの壊れた行で落ちない: '+JSON.stringify(x.slice(0,18)), ok);
+      t('あやしい行は採用しない: '+JSON.stringify(x.slice(0,18)), ok && (r===null || (Array.isArray(r) && new Set(r).size===r.length)));
+    });
+  }
+  {
+    // 自分自身を呼ぶレイヤー / 存在しないレイヤーを呼ぶレイヤー
+    const mk = n => Array.from({length:n},(_,i)=>({name:'L'+i, bindings:['&mo '+i, '&mo 99']}));
+    let ok=true, o;
+    try{ o = C.fwOrder([{name:'A',count:3}], mk(3)); }catch(e){ ok=false; }
+    t('自己参照や範囲外の参照でも並びを返す', ok && Array.isArray(o) && new Set(o).size===3, JSON.stringify(o));
+  }
+  {
+    // キー数の食い違うレイヤーどうしを同期しようとしても落ちない
+    const st = {layers:[{name:'a',bindings:['&kp A','&kp B'],shiftLayer:false},
+                        {name:'b',bindings:['&kp A'],shiftLayer:false}],
+      groups:[{name:'A',count:1,locale:'us',platform:'win'},{name:'B',count:1,locale:'jis',platform:'mac'}],
+      behaviors:{morphs:[],tds:[],raws:[],hts:[]}, combos:[], condLayers:[], links:[[0,1]]};
+    let ok=true, r;
+    try{ r = C.computeLinkSync(st, [0,1], 0); }catch(e){ ok=false; }
+    t('キー数が食い違っても同期の計算が落ちない', ok && !!r, ok? JSON.stringify(r.targets.length) : 'throw');
+  }
+  {
+    // 行構成がおかしいプロファイルでも初期キーマップを返す
+    [[], null, [[0,0,0]], [[0,99,99]]].forEach((rows,i)=>{
+      let ok=true, txt;
+      try{ txt = C.makeDefaultKeymap({id:'x'+i, keyCount:4, rows}); }catch(e){ ok=false; }
+      t('妙な行構成でも初期キーマップを返す #'+i, ok && typeof txt==='string' && txt.includes('keymap'));
+    });
+  }
+
   // 付随するパーサも壊れた入力で落ちないこと
   ['', 'garbage', 'combos {', 'behaviors { x: y {'].forEach(x=>{
     let ok = true;
@@ -2317,7 +3565,9 @@ section('全配列の往復');
 
 section('メタ');
 t('APP_VERSION', typeof C.APP_VERSION==='string' && /^\d+\.\d+\.\d+$/.test(C.APP_VERSION));
-t('公開版デフォルト(個人設定を含まない)', C.DEFAULT_KEYMAP.includes('default_layer') && !C.DEFAULT_KEYMAP.includes('comma_morph'));
+t('起動時のキーマップに個人設定が混じらない',
+  !/combos\s*\{/.test(C.DEFAULT_KEYMAP) && !/macros\s*\{/.test(C.DEFAULT_KEYMAP)
+  && C.DEFAULT_KEYMAP.includes('base_layer'), C.DEFAULT_KEYMAP.slice(0,40));
 // 公開物に個人情報が混じらないこと(プレースホルダや例示に実名が残りやすい)
 {
   const personal = ['ikooo', 'toyokoji', 'ikoooGit'];
