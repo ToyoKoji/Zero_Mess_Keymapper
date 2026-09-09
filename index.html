@@ -166,6 +166,17 @@ button.lk-shift{min-width:118px}
 .kbtn.custom .mtag{position:absolute;bottom:0;right:4px;font-size:8px;color:var(--dim)}
 #board-wrap{display:flex;justify-content:center;padding:8px 16px 4px}
 #board{position:relative}
+/* 画面が狭いとき。盤面もレイヤーバーも、はみ出す分は自分の中で横スクロールさせる。
+   ページごと横に動くと、ヘッダーや背景は画面幅しか無いので端が切れ、
+   中央寄せの盤面と左寄せの行が別々にずれて見える。
+   1000px を超える画面では、この節はまるごと効かない(PCの見た目は変わらない)。 */
+@media (max-width: 1000px){
+  #board-wrap{overflow-x:auto}
+  /* justify-content:center は、はみ出したときに左右へ等分にあふれさせるので
+     左端が画面外に出て二度と触れなくなる。auto マージンなら 0 に落ちて左詰めになる */
+  #board{margin:0 auto}
+  #layerbar{overflow-x:auto}
+}
 .key{position:absolute;background:var(--key);border:1px solid var(--border);border-radius:7px;cursor:pointer;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;overflow:hidden;transition:background .1s,border-color .1s}
 .key:hover{background:var(--keyhover);border-color:var(--accent)}
 .key.selected{border-color:var(--accent);box-shadow:0 0 0 2px var(--accent);background:var(--keyhover)}
@@ -1272,7 +1283,7 @@ Shiftの有無で記号が変わるキー(<kbd>'</kbd> と <kbd>"</kbd> など)�
  * 文字テーブル(LOCALE_CHARS) / .keymapパース / 生成 / 各機能ノードの
  * パース&パッチ / グループ・変換ユーティリティ / 表示ラベル
  * ============================================================ */
-const APP_VERSION = '5.8.0';
+const APP_VERSION = '5.9.0';
 
 let NUM_KEYS = 42;   // 既定のキーボード(Corne)のキー数
 // roBa physical layout: [w,h,x,y,rot(centi-deg*100),rx,ry]
@@ -4399,17 +4410,21 @@ function showDropLine(dir, box, at, g){
   el.dataset.dir = dir;
   el.dataset.at = String(at);
   el.classList.add('on');
-  const b = (g && g.barBox) || boxOf(document.getElementById('layerbar'));
+  const bar = document.getElementById('layerbar');
+  const b = (g && g.barBox) || boxOf(bar);
   if(!b || !box) return;          // 大きさを測れない環境では位置だけ持たせる
+  /* 画面が狭いとバー自身が横に動く。線はバーの中身と一緒に動く位置に置かれるので、
+     画面の座標から引くだけでは、動かした分だけずれる。 */
+  const sx = (bar && bar.scrollLeft) || 0, sy = (bar && bar.scrollTop) || 0;
   if(dir === 'h'){
-    el.style.left = (box.left - b.left) + 'px';
+    el.style.left = (box.left - b.left + sx) + 'px';
     el.style.width = Math.max(0, box.right - box.left) + 'px';
-    el.style.top = (box.top - b.top - 1) + 'px';
+    el.style.top = (box.top - b.top + sy - 1) + 'px';
     el.style.height = '2px';
   } else {
-    el.style.left = (box.left - b.left - 1) + 'px';
+    el.style.left = (box.left - b.left + sx - 1) + 'px';
     el.style.width = '2px';
-    el.style.top = (box.top - b.top) + 'px';
+    el.style.top = (box.top - b.top + sy) + 'px';
     el.style.height = Math.max(0, box.bottom - box.top) + 'px';
   }
 }
